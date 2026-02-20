@@ -86,9 +86,9 @@ export default function Signup() {
 
   async function loadMaps() {
     setOptions({
-      apiKey: key,
-      version: 'weekly',
-    })
+    key: key,
+    v: 'weekly',
+  })
 
     const { Autocomplete } = await importLibrary('places') as google.maps.PlacesLibrary
 
