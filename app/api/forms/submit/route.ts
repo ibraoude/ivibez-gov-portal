@@ -81,6 +81,9 @@ export async function POST(req: Request) {
     );
 
     const verifyData = await verifyRes.json();
+console.log("RECAPTCHA VERIFY RESPONSE:", verifyData);
+
+
 
     if (!verifyData.success || verifyData.score < 0.5) {
       return NextResponse.json(
