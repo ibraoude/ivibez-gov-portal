@@ -22,40 +22,74 @@ export default function Login() {
     }
   }
 
+  
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-      <h1 className="text-2xl font-bold">Login</h1>
+  <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="bg-white w-[420px] p-12 rounded-2xl shadow-xl">
 
-      <input
-        className="border p-2"
-        type="email"
-        placeholder="Email"
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      {/* Logo */}
+      <div className="flex justify-center mb-6">
+        <div className="flex items-baseline">
+          <span className="text-6xl font-black text-green-700 tracking-tight">
+            iVibeZ
+          </span>
+          <span className="ml-3 text-3xl font-bold text-blue-700 tracking-tight">
+            Solutions
+          </span>
+        </div>
+      </div>
 
-      <input
-        className="border p-2"
-        type="password"
-        placeholder="Password"
-        onChange={(e) => setPassword(e.target.value)}
-      />
+      <h1 className="text-2xl font-semibold text-center mb-8">
+        Login
+      </h1>
 
+      {/* Email */}
+      <div className="mb-5">
+        <label className="block mb-2 text-sm font-medium">
+          Email
+        </label>
+        <input
+          type="email"
+          placeholder="Enter your email"
+          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600"
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
+
+      {/* Password */}
+      <div className="mb-6">
+        <label className="block mb-2 text-sm font-medium">
+          Password
+        </label>
+        <input
+          type="password"
+          placeholder="Enter your password"
+          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600"
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
+
+      {/* Button */}
       <button
-        className="bg-black text-white px-4 py-2"
         onClick={handleLogin}
+        className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold transition"
       >
         Login
       </button>
 
-      <p className="text-sm mt-4">
-        Don’t have an account?{' '}
+      {/* Footer */}
+      <p className="text-center text-sm mt-6">
+        Don’t have an account?{" "}
         <span
-          className="text-blue-600 cursor-pointer"
+          className="text-blue-600 font-medium cursor-pointer"
           onClick={() => router.push('/signup')}
         >
           Sign up
         </span>
       </p>
+
     </div>
-  )
+  </div>
+)
 }

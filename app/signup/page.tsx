@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
+import Image from 'next/image'
 
 type CountryOption = { code: string; name: string }
 
@@ -214,7 +215,8 @@ export default function Signup() {
 
   // ---------- Signup ----------
   const handleSignup = async () => {
-    if (!validate()) return
+    console.log("Signup clicked")
+    //if (!validate()) return
 
     setLoading(true)
     try {
@@ -276,9 +278,8 @@ export default function Signup() {
         alert(profileError.message)
         return
       }
-
+      router.replace('/login?registered=true')
       alert('Account created! Please check your email to verify your account (if enabled).')
-      router.push('/login')
     } finally {
       setLoading(false)
     }
@@ -291,112 +292,200 @@ export default function Signup() {
     errors[name] ? <div className="text-red-600 text-sm w-[320px]">{errors[name]}</div> : null
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen gap-3 p-6">
-      <h1 className="text-2xl font-bold">Create Account</h1>
+  <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-200 flex items-center justify-center px-6 py-12">
+    
+    <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl p-12 space-y-10">
 
-      <input name="firstName" placeholder="First Name" className={fieldClass('firstName')} onChange={handleChange} />
-      <ErrorText name="firstName" />
+      <div className="flex flex-col items-center text-center space-y-6">
 
-      <input name="lastName" placeholder="Last Name" className={fieldClass('lastName')} onChange={handleChange} />
-      <ErrorText name="lastName" />
+          {/* Logo */}
+      <div className="flex justify-center mb-8">
+        <div className="flex items-baseline">
+          <span className="text-6xl md:text-7xl font-black text-green-700 tracking-tight">
+            iVibeZ
+          </span>
+          <span className="ml-3 text-3xl md:text-4xl font-bold text-blue-700 tracking-tight">
+            Solutions
+          </span>
+        </div>
+      </div>
 
-      <input name="phone" placeholder="Phone (e.g., +1 240 555 1234)" className={fieldClass('phone')} onChange={handleChange} />
-      <ErrorText name="phone" />
+          {/* TAGLINE */}
+          {/*<p className="text-gray-500 text-lg tracking-wide max-w-md">
+            Your platform tagline goes right here. 
+            You can describe what your SaaS does in one strong sentence.
+          </p>*/}
 
-      <input name="company" placeholder="Company (Optional)" className={fieldClass('company')} onChange={handleChange} />
+          {/* TITLE */}
+          <h1 className="text-3xl font-bold text-gray-900">
+            Create Account
+          </h1>
 
-      {/* Country dropdown */}
-      <select name="countryCode" className={fieldClass('countryCode')} value={formData.countryCode} onChange={handleChange}>
-        {COUNTRIES.map((c) => (
-          <option key={c.code} value={c.code}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+        </div>
 
-      {/* Address with Google Places Autocomplete */}
-      <input
-        ref={address1Ref}
-        name="addressLine1"
-        placeholder="Address Line 1"
-        className={fieldClass('addressLine1')}
-        value={formData.addressLine1}
-        onChange={handleChange}
-      />
-      <ErrorText name="addressLine1" />
+      {/* FORM */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-      <input
-        name="addressLine2"
-        placeholder="Address Line 2 (Apt, Suite, etc.)"
-        className={fieldClass('addressLine2')}
-        value={formData.addressLine2}
-        onChange={handleChange}
-      />
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">First Name</label>
+          <input name="firstName" className="input-large" onChange={handleChange} />
+        </div>
 
-      <input
-        name="city"
-        placeholder="City"
-        className={fieldClass('city')}
-        value={formData.city}
-        onChange={handleChange}
-      />
-      <ErrorText name="city" />
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Last Name</label>
+          <input name="lastName" className="input-large" onChange={handleChange} />
+        </div>
 
-      {/* Dynamic State/Province dropdown */}
-      {regionOptions ? (
-        <select
-          name="stateRegion"
-          className={fieldClass('stateRegion')}
-          value={formData.stateRegion}
-          onChange={handleChange}
-        >
-          <option value="">Select State/Province</option>
-          {regionOptions.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <input
-          name="stateRegion"
-          placeholder="State / Region"
-          className={fieldClass('stateRegion')}
-          value={formData.stateRegion}
-          onChange={handleChange}
-        />
-      )}
-      <ErrorText name="stateRegion" />
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Phone</label>
+          <input name="phone" className="input-large" onChange={handleChange} />
+        </div>
 
-      <input
-        name="postalCode"
-        placeholder={formData.countryCode === 'US' ? 'ZIP Code' : 'Postal Code'}
-        className={fieldClass('postalCode')}
-        value={formData.postalCode}
-        onChange={handleChange}
-        onBlur={handleZipBlur}
-      />
-      <ErrorText name="postalCode" />
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Company (Optional)</label>
+          <input name="company" className="input-large" onChange={handleChange} />
+        </div>
 
-      <select name="role" className={fieldClass('role')} value={formData.role} onChange={handleChange}>
-        <option value="client">Client</option>
-        <option value="agent">Agent</option>
-        <option value="admin">Admin</option>
-      </select>
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Country</label>
+          <select
+            name="countryCode"
+            className="input-large"
+            value={formData.countryCode}
+            onChange={handleChange}
+          >
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>{c.name}</option>
+            ))}
+          </select>
+        </div>
 
-      <input name="email" type="email" placeholder="Email" className={fieldClass('email')} onChange={handleChange} />
-      <ErrorText name="email" />
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Address Line 1</label>
+          <input
+            ref={address1Ref}
+            name="addressLine1"
+            className="input-large"
+            value={formData.addressLine1}
+            onChange={handleChange}
+          />
+        </div>
 
-      <input name="password" type="password" placeholder="Password (min 8 chars)" className={fieldClass('password')} onChange={handleChange} />
-      <ErrorText name="password" />
+        <div className="md:col-span-2 space-y-2">
+          <label className="font-semibold text-gray-800">
+            Address Line 2 (Apt, Suite, etc.)
+          </label>
+          <input
+            name="addressLine2"
+            className="input-large"
+            value={formData.addressLine2}
+            onChange={handleChange}
+          />
+        </div>
 
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">City</label>
+          <input
+            name="city"
+            className="input-large"
+            value={formData.city}
+            onChange={handleChange}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">State / Province</label>
+          {regionOptions ? (
+            <select
+              name="stateRegion"
+              className="input-large"
+              value={formData.stateRegion}
+              onChange={handleChange}
+            >
+              <option value="">Select State / Province</option>
+              {regionOptions.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              name="stateRegion"
+              className="input-large"
+              value={formData.stateRegion}
+              onChange={handleChange}
+            />
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">ZIP Code</label>
+          <input
+            name="postalCode"
+            className="input-large"
+            value={formData.postalCode}
+            onChange={handleChange}
+            onBlur={handleZipBlur}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Role</label>
+          <select
+            name="role"
+            className="input-large"
+            value={formData.role}
+            onChange={handleChange}
+          >
+            <option value="client">Client</option>
+            <option value="agent">Agent</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Email</label>
+          <input
+            name="email"
+            type="email"
+            className="input-large"
+            onChange={handleChange}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="font-semibold text-gray-800">Password</label>
+          <input
+            name="password"
+            type="password"
+            className="input-large"
+            onChange={handleChange}
+          />
+        </div>
+
+      </div>
+
+      {/* GREEN BUTTON */}
       <button
-        className="bg-black text-white px-4 py-2 w-[320px] disabled:opacity-60"
         onClick={handleSignup}
         disabled={loading}
+        className={`w-full py-4 rounded-xl text-lg font-semibold transition-all duration-200
+          ${loading 
+            ? "bg-green-400 cursor-not-allowed"
+            : "bg-green-600 hover:bg-green-700 hover:shadow-lg active:scale-[0.98]"}
+          text-white`}
       >
-        {loading ? 'Creating account...' : 'Sign Up'}
+        {loading ? (
+          <span className="flex items-center justify-center gap-2">
+            <span className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></span>
+            Creating Account...
+          </span>
+        ) : (
+          "Sign Up"
+        )}
       </button>
+
     </div>
-  )
+  </div>
+)
 }
+
