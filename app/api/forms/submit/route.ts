@@ -82,7 +82,7 @@ export async function POST(req: Request) {
 
     const verifyData = await verifyRes.json();
 
-    if (!verifyData.success || verifyData.score < 0.2) {
+    if (!verifyData.success || verifyData.score < 0.05) {
       return NextResponse.json(
         { error: "Security verification failed." },
         { status: 400, headers: getCorsHeaders(origin) }
