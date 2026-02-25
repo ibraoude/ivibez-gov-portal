@@ -28,7 +28,7 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 }
 
 /* ===============================
-   HANDLE PREFLIGHT (OPTIONS)
+   HANDLE PREFLIGHT
 ================================= */
 
 export async function OPTIONS(req: Request) {
@@ -41,7 +41,7 @@ export async function OPTIONS(req: Request) {
 }
 
 /* ===============================
-   HANDLE POST REQUEST
+   HANDLE POST
 ================================= */
 
 export async function POST(req: Request) {
@@ -57,19 +57,51 @@ export async function POST(req: Request) {
       page_url,
       referrer,
       user_agent,
-      ...formFields
+
+      // Common fields
+      first_name,
+      last_name,
+      name,
+      email,
+      phone,
+      message,
+      service_interest,
+
+      // Government-specific
+      organization_name,
+      role_type,
+      role_other,
+      request_type,
+      naics_code,
+      preferred_contact_time,
+      project_scope,
+
+      // Honeypot
+      company
+
     } = body;
 
-    if (!captchaToken) {
+    /* ===============================
+       HONEYPOT PROTECTION
+    ================================= */
+
+    if (company) {
       return NextResponse.json(
-        { error: "Missing captcha token" },
+        { error: "Bot detected." },
         { status: 400, headers: getCorsHeaders(origin) }
       );
     }
 
     /* ===============================
-       VERIFY RECAPTCHA
+       CAPTCHA VALIDATION
     ================================= */
+
+    if (!captchaToken) {
+      return NextResponse.json(
+        { error: "Missing captcha token." },
+        { status: 400, headers: getCorsHeaders(origin) }
+      );
+    }
 
     const verifyRes = await fetch(
       "https://www.google.com/recaptcha/api/siteverify",
@@ -82,6 +114,8 @@ export async function POST(req: Request) {
 
     const verifyData = await verifyRes.json();
 
+    console.log("RECAPTCHA VERIFY RESPONSE:", verifyData);
+
     if (!verifyData.success || verifyData.score < 0.05) {
       return NextResponse.json(
         { error: "Security verification failed." },
@@ -90,7 +124,7 @@ export async function POST(req: Request) {
     }
 
     /* ===============================
-       CONNECT TO SUPABASE
+       SUPABASE CLIENT (SERVER)
     ================================= */
 
     const supabase = createClient(
@@ -98,19 +132,77 @@ export async function POST(req: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    /* ===============================
-       DETERMINE TARGET TABLE
-    ================================= */
-
+    let insertData: Record<string, any> = {};
     let table: string | undefined;
 
-    if (formType === "contact") table = "contact_submissions";
-    if (formType === "government") table = "gov_submissions";
-    if (formType === "realestate") table = "realestate_submissions";
+    /* ===============================
+       MAP FIELDS EXPLICITLY
+    ================================= */
+
+    if (formType === "contact") {
+      table = "contact_submissions";
+
+      insertData = {
+        submission_id: submissionId,
+        first_name: first_name || null,
+        last_name: last_name || null,
+        email: email || null,
+        phone: phone || null,
+        message: message || null,
+        service_interest: service_interest || null,
+        page_url,
+        referrer,
+        user_agent,
+        created_at: new Date().toISOString()
+      };
+    }
+
+    if (formType === "government") {
+      table = "gov_submissions";
+
+      insertData = {
+        submission_id: submissionId,
+        first_name: first_name || null,
+        last_name: last_name || null,
+        organization_name: organization_name || null,
+        email: email || null,
+        phone: phone || null,
+        role_type: role_type || null,
+        role_other: role_other || null,
+        request_type: request_type || null,
+        naics_code: naics_code || null,
+        preferred_contact_time: preferred_contact_time || null,
+        project_scope: project_scope || null,
+        page_url,
+        referrer,
+        user_agent,
+        created_at: new Date().toISOString()
+      };
+    }
+
+    if (formType === "realestate") {
+      table = "realestate_submissions";
+
+      insertData = {
+        submission_id: submissionId,
+        first_name: first_name || null,
+        last_name: last_name || null,
+        email: email || null,
+        phone: phone || null,
+        role_type: role_type || null,
+        role_other: role_other || null,
+        preferred_contact_time: preferred_contact_time || null,
+        project_scope: project_scope || null,
+        page_url,
+        referrer,
+        user_agent,
+        created_at: new Date().toISOString()
+      };
+    }
 
     if (!table) {
       return NextResponse.json(
-        { error: "Invalid form type" },
+        { error: "Invalid form type." },
         { status: 400, headers: getCorsHeaders(origin) }
       );
     }
@@ -121,16 +213,10 @@ export async function POST(req: Request) {
 
     const { error } = await supabase
       .from(table)
-      .insert({
-        submission_id: submissionId,
-        ...formFields,
-        page_url,
-        referrer,
-        user_agent,
-        created_at: new Date().toISOString()
-      });
+      .insert(insertData);
 
     if (error) {
+      console.error("SUPABASE INSERT ERROR:", error);
       return NextResponse.json(
         { error: error.message },
         { status: 400, headers: getCorsHeaders(origin) }
@@ -143,6 +229,7 @@ export async function POST(req: Request) {
     );
 
   } catch (err: any) {
+    console.error("SERVER ERROR:", err);
     return NextResponse.json(
       { error: err.message || "Server error" },
       { status: 500, headers: getCorsHeaders(origin) }
