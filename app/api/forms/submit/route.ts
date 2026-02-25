@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { Resend } from "resend";
 
 /* ===============================
    CORS CONFIGURATION
@@ -214,6 +215,91 @@ export async function POST(req: Request) {
     const { error } = await supabase
       .from(table)
       .insert(insertData);
+
+    try {
+      // resend logic here
+      
+      const resend = new Resend(process.env.RESEND_API_KEY!);
+
+      // Send confirmation to client
+      await resend.emails.send({
+        from: "iVibeZ Solutions <no-reply@ivibezsolutions.com>",
+        to: email,
+        subject: "We received your request",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+            <h2 style="color:#111;">Hi ${first_name || ""},</h2>
+
+            <p>
+              Thank you for reaching out to <strong>iVibeZ Solutions</strong>.
+              We’ve successfully received your request.
+            </p>
+
+            <p>
+              Our team will review your submission and respond within 24 hours.
+            </p>
+
+            <hr style="margin:20px 0;">
+
+            <h3 style="margin-bottom:10px;">Submission Details</h3>
+
+            <p><strong>Reference ID:</strong> ${submissionId}</p>
+            <p><strong>Name:</strong> ${first_name || ""} ${last_name || ""}</p>
+            <p><strong>Email:</strong> ${email}</p>
+            ${phone ? `<p><strong>Phone:</strong> ${phone}</p>` : ""}
+
+            <hr style="margin:20px 0;">
+
+            <p style="font-size:14px; color:#555;">
+              If you did not submit this request, please ignore this email.
+            </p>
+
+            <p style="margin-top:30px;">
+              — iVibeZ Solutions Team
+            </p>
+
+          </div>
+        `
+      });
+
+      // Send notification to admin
+      await resend.emails.send({
+        from: "iVibeZ Solutions <no-reply@ivibezsolutions.com>",
+        to: "iedou@ivibezsolutions.com",
+        subject: `New ${formType} submission`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+
+            <h2 style="color:#111;">New ${formType} Submission</h2>
+
+            <hr style="margin:20px 0;">
+
+            <p><strong>Reference ID:</strong> ${submissionId}</p>
+            <p><strong>Name:</strong> ${first_name || ""} ${last_name || ""}</p>
+            <p><strong>Email:</strong> ${email}</p>
+            ${phone ? `<p><strong>Phone:</strong> ${phone}</p>` : ""}
+
+            ${service_interest ? `<p><strong>Service Interest:</strong> ${service_interest}</p>` : ""}
+            ${organization_name ? `<p><strong>Organization:</strong> ${organization_name}</p>` : ""}
+            ${naics_code ? `<p><strong>NAICS Code:</strong> ${naics_code}</p>` : ""}
+
+            ${message ? `<p><strong>Message:</strong><br>${message}</p>` : ""}
+            ${project_scope ? `<p><strong>Project Scope:</strong><br>${project_scope}</p>` : ""}
+
+            <hr style="margin:20px 0;">
+
+            <p style="font-size:13px; color:#666;">
+              Submitted from: ${page_url}
+            </p>
+
+          </div>
+        `
+      });
+    } catch (emailErr) {
+      console.error("Email failed:", emailErr);
+    }
+
 
     if (error) {
       console.error("SUPABASE INSERT ERROR:", error);
