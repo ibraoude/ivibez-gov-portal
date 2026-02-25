@@ -225,76 +225,138 @@ export async function POST(req: Request) {
       await resend.emails.send({
         from: "iVibeZ Solutions <no-reply@ivibezsolutions.com>",
         to: email,
-        subject: "We received your request",
+        subject:
+          formType === "realestate"
+            ? "🏠 New Real Estate Inquiry"
+            : formType === "government"
+            ? "🏛 New Government Inquiry"
+            : "📩 New Contact Message",
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background:#f8fafc; padding:40px 20px;">
+            <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.05); font-family:Arial, sans-serif;">
 
-            <h2 style="color:#111;">Hi ${first_name || ""},</h2>
+              <!-- Header -->
+              <div style="background:#0f172a; padding:24px; text-align:center;">
+                <h1 style="color:#ffffff; margin:0; font-size:22px;">
+                  iVibeZ Solutions
+                </h1>
+              </div>
 
-            <p>
-              Thank you for reaching out to <strong>iVibeZ Solutions</strong>.
-              We’ve successfully received your request.
-            </p>
+              <!-- Body -->
+              <div style="padding:30px;">
 
-            <p>
-              Our team will review your submission and respond within 24 hours.
-            </p>
+                <h2 style="margin-top:0; color:#111;">
+                  Hi ${first_name || "there"},
+                </h2>
 
-            <hr style="margin:20px 0;">
+                <p style="color:#444; line-height:1.6;">
+                  Thank you for reaching out. We’ve successfully received your request
+                  and our team is reviewing it.
+                </p>
 
-            <h3 style="margin-bottom:10px;">Submission Details</h3>
+                <p style="color:#444; line-height:1.6;">
+                  You can expect a response within <strong>24 hours</strong>.
+                </p>
 
-            <p><strong>Reference ID:</strong> ${submissionId}</p>
-            <p><strong>Name:</strong> ${first_name || ""} ${last_name || ""}</p>
-            <p><strong>Email:</strong> ${email}</p>
-            ${phone ? `<p><strong>Phone:</strong> ${phone}</p>` : ""}
+                <!-- Reference Card -->
+                <div style="margin:30px 0; padding:20px; background:#f1f5f9; border-radius:10px;">
+                  <p style="margin:0; font-size:14px; color:#555;">
+                    <strong>Reference ID</strong><br>
+                    <span style="font-size:16px; color:#0f172a;">
+                      ${submissionId}
+                    </span>
+                  </p>
+                </div>
 
-            <hr style="margin:20px 0;">
+                <!-- CTA Button -->
+                <div style="text-align:center; margin:30px 0;">
+                  <a href="https://www.ivibezsolutions.com"
+                    style="display:inline-block; padding:14px 28px; background:#16a34a; color:#ffffff; text-decoration:none; border-radius:8px; font-weight:bold;">
+                    Visit Our Website
+                  </a>
+                </div>
 
-            <p style="font-size:14px; color:#555;">
-              If you did not submit this request, please ignore this email.
-            </p>
+                <p style="font-size:14px; color:#666;">
+                  If you did not submit this request, please ignore this email.
+                </p>
 
-            <p style="margin-top:30px;">
-              — iVibeZ Solutions Team
-            </p>
+                <p style="margin-top:30px; color:#111;">
+                  — The iVibeZ Solutions Team
+                </p>
 
+              </div>
+
+              <!-- Footer -->
+              <div style="background:#f8fafc; padding:20px; text-align:center; font-size:12px; color:#777;">
+                © ${new Date().getFullYear()} iVibeZ Solutions. All rights reserved.
+              </div>
+
+            </div>
           </div>
-        `
+          `
       });
 
       // Send notification to admin
       await resend.emails.send({
         from: "iVibeZ Solutions <no-reply@ivibezsolutions.com>",
         to: "iedou@ivibezsolutions.com",
-        subject: `New ${formType} submission`,
+        subject:
+          formType === "realestate"
+            ? "🏠 New Real Estate Inquiry"
+            : formType === "government"
+            ? "🏛 New Government Inquiry"
+            : "📩 New Contact Message",
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background:#f8fafc; padding:40px 20px;">
+            <div style="max-width:650px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.05); font-family:Arial, sans-serif;">
 
-            <h2 style="color:#111;">New ${formType} Submission</h2>
+              <!-- Header -->
+              <div style="background:#111827; padding:24px;">
+                <h1 style="color:#ffffff; margin:0; font-size:20px;">
+                  New ${formType.toUpperCase()} Submission
+                </h1>
+              </div>
 
-            <hr style="margin:20px 0;">
+              <!-- Body -->
+              <div style="padding:30px;">
 
-            <p><strong>Reference ID:</strong> ${submissionId}</p>
-            <p><strong>Name:</strong> ${first_name || ""} ${last_name || ""}</p>
-            <p><strong>Email:</strong> ${email}</p>
-            ${phone ? `<p><strong>Phone:</strong> ${phone}</p>` : ""}
+                <!-- Info Grid -->
+                <div style="display:grid; gap:12px; font-size:14px;">
 
-            ${service_interest ? `<p><strong>Service Interest:</strong> ${service_interest}</p>` : ""}
-            ${organization_name ? `<p><strong>Organization:</strong> ${organization_name}</p>` : ""}
-            ${naics_code ? `<p><strong>NAICS Code:</strong> ${naics_code}</p>` : ""}
+                  <div><strong>Reference ID:</strong> ${submissionId}</div>
+                  <div><strong>Name:</strong> ${first_name || ""} ${last_name || ""}</div>
+                  <div><strong>Email:</strong> ${email}</div>
+                  ${phone ? `<div><strong>Phone:</strong> ${phone}</div>` : ""}
 
-            ${message ? `<p><strong>Message:</strong><br>${message}</p>` : ""}
-            ${project_scope ? `<p><strong>Project Scope:</strong><br>${project_scope}</p>` : ""}
+                  ${service_interest ? `<div><strong>Service Interest:</strong> ${service_interest}</div>` : ""}
+                  ${organization_name ? `<div><strong>Organization:</strong> ${organization_name}</div>` : ""}
+                  ${naics_code ? `<div><strong>NAICS Code:</strong> ${naics_code}</div>` : ""}
 
-            <hr style="margin:20px 0;">
+                </div>
 
-            <p style="font-size:13px; color:#666;">
-              Submitted from: ${page_url}
-            </p>
+                ${(message || project_scope) ? `
+                <div style="margin-top:25px; padding:20px; background:#f1f5f9; border-radius:10px;">
+                  <strong>Message:</strong>
+                  <p style="margin-top:10px; line-height:1.6; color:#333;">
+                    ${message || project_scope}
+                  </p>
+                </div>
+                ` : ""}
 
+                <div style="margin-top:25px; font-size:12px; color:#777;">
+                  Submitted from: ${page_url}
+                </div>
+
+              </div>
+
+              <!-- Footer -->
+              <div style="background:#f8fafc; padding:18px; text-align:center; font-size:12px; color:#777;">
+                Internal Notification • iVibeZ Solutions
+              </div>
+
+            </div>
           </div>
-        `
+          `
       });
     } catch (emailErr) {
       console.error("Email failed:", emailErr);
