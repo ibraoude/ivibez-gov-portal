@@ -81,13 +81,8 @@ export async function POST(req: Request) {
     );
 
     const verifyData = await verifyRes.json();
-console.log("RECAPTCHA VERIFY RESPONSE:", verifyData);
-console.log("SUPABASE URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
-console.log("SERVICE KEY LENGTH:", process.env.SUPABASE_SERVICE_ROLE_KEY?.length);
 
-
-
-    if (!verifyData.success || verifyData.score < 0.5) {
+    if (!verifyData.success || verifyData.score < 0.2) {
       return NextResponse.json(
         { error: "Security verification failed." },
         { status: 400, headers: getCorsHeaders(origin) }
