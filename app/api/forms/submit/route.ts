@@ -82,6 +82,8 @@ export async function POST(req: Request) {
 
     const verifyData = await verifyRes.json();
 console.log("RECAPTCHA VERIFY RESPONSE:", verifyData);
+console.log("SUPABASE URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+console.log("SERVICE KEY LENGTH:", process.env.SUPABASE_SERVICE_ROLE_KEY?.length);
 
 
 
