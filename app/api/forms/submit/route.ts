@@ -117,7 +117,7 @@ export async function POST(req: Request) {
 
     console.log("RECAPTCHA VERIFY RESPONSE:", verifyData);
 
-    if (!verifyData.success || verifyData.score < 0.05) {
+    if (!verifyData.success || verifyData.score < 0.5) {
       return NextResponse.json(
         { error: "Security verification failed." },
         { status: 400, headers: getCorsHeaders(origin) }
