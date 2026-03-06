@@ -1,57 +1,107 @@
+
+/* Tailwind v4 entry (single import) */
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* If you are using next-themes with class strategy, keep this. 
+   It makes dark:* utilities activate when <html class="dark"> is present. */
+@custom-variant dark (&:where(.dark, .dark *));
 
+/* ===========================
+   THEME TOKENS (optional)
+   Put brand tokens here. Keep them neutral; theme colors
+   come from Tailwind classes so they switch with `html.dark`.
+=========================== */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ===========================
+   BASE (cooperates with next-themes)
+=========================== */
+@layer base {
+  html, body, #__next {
+    height: 100%;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
+  /* Light by default */
+  body {
+    @apply min-h-screen bg-gray-50 text-gray-900 antialiased transition-colors duration-200;
+  }
 
+  /* Dark when ThemeProvider sets <html class="dark"> */
+  html.dark body {
+    @apply bg-black text-gray-100;
+  }
+
+  /* Smooth selection color (optional) */
+  ::selection {
+    @apply bg-blue-600 text-white;
+  }
+
+  /* -------- Scrollbar styling (optional) -------- */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme(colors.gray.400) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: theme(colors.gray.400 / 0.5);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  html.dark *::-webkit-scrollbar-thumb {
+    background-color: theme(colors.gray.500 / 0.5);
+  }
+} /* ← closes @layer base */
+
+/* ===========================
+   COMPONENT UTILITIES
+   (converted to be dark-aware)
+=========================== */
+
+/* Large input */
 .input-large {
-  @apply w-full border border-gray-300 rounded-xl px-5 py-4 text-lg
-         focus:outline-none focus:ring-2 focus:ring-green-500
-         focus:border-green-500 transition-all duration-200;
+  @apply w-full rounded-xl px-5 py-4 text-lg transition-all duration-200
+         border border-gray-300 bg-white text-gray-900
+         focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500
+         dark:border-white/10 dark:bg-neutral-900 dark:text-gray-100;
 }
 
-/* =============================
+/* ===========================
    AUTH PAGES (Login / Signup)
-============================= */
+=========================== */
+
 /* Background */
 .auth-container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f3f4f6;
+
+  /* Use Tailwind so it flips with dark mode */
+  @apply bg-gray-100 dark:bg-neutral-950;
   font-family: Arial, sans-serif;
 }
 
 /* Card */
 .auth-card {
-  background: #ffffff;
-  padding: 50px;
   width: 420px;
+  padding: 50px;
   border-radius: 20px;
-  box-shadow: 0 15px 40px rgba(0,0,0,0.08);
   text-align: center;
+
+  /* Theme-aware surface + subtle elevation */
+  @apply bg-white text-gray-900 shadow-[0_15px_40px_rgba(0,0,0,0.08)]
+         border border-gray-200
+         dark:bg-white/5 dark:text-gray-100 dark:border-white/10;
 }
 
 /* Logo */
@@ -60,14 +110,8 @@ body {
   font-weight: bold;
   margin-bottom: 20px;
 }
-
-.logo-green {
-  color: #0c7c30;
-}
-
-.logo-blue {
-  color: #2563eb;
-}
+.logo-green { color: #0c7c30; }
+.logo-blue { color: #2563eb; }
 
 /* Title */
 .auth-card h2 {
@@ -81,29 +125,31 @@ body {
   text-align: left;
   margin-bottom: 20px;
 }
-
 .form-group label {
   display: block;
   margin-bottom: 6px;
   font-weight: 500;
 }
 
+/* Inputs inside auth card */
 .form-group input {
   width: 100%;
   padding: 14px;
   border-radius: 10px;
-  border: 1px solid #d1d5db;
   font-size: 14px;
   outline: none;
   transition: 0.3s;
-}
 
+  @apply border border-gray-300 bg-white text-gray-900
+         dark:border-white/10 dark:bg-neutral-900 dark:text-gray-100;
+}
 .form-group input:focus {
+  /* Keep brand focus; optional dark shadow tweak */
   border-color: #0c7c30;
-  box-shadow: 0 0 0 3px rgba(12,124,48,0.15);
+  box-shadow: 0 0 0 3px rgba(12, 124, 48, 0.15);
 }
 
-/* Button */
+/* Primary button */
 .primary-btn {
   width: 100%;
   padding: 15px;
@@ -116,7 +162,6 @@ body {
   cursor: pointer;
   transition: 0.3s;
 }
-
 .primary-btn:hover {
   background: #0b7e30;
 }
@@ -126,7 +171,6 @@ body {
   margin-top: 20px;
   font-size: 14px;
 }
-
 .auth-footer a {
   color: #2563eb;
   text-decoration: none;
