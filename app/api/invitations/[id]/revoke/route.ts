@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { secureRoute } from '@/lib/security/secure-route';
 import { logAudit } from '@/lib/audit/log-audit';
@@ -15,11 +14,11 @@ function extractId(req: Request, params?: { id?: string }) {
   return null;
 }
 
-  export async function POST(
+export async function POST(
   req: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
-  const { params } = context;
+  const params = await context.params;
 
   return secureRoute(
     req,
@@ -31,8 +30,12 @@ function extractId(req: Request, params?: { id?: string }) {
     },
     async ({ supabase, profile, user }) => {
       const id = extractId(req, params);
-      if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-      if (!profile.org_id) return NextResponse.json({ error: 'No org' }, { status: 403 });
+
+      if (!id)
+        return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+      if (!profile.org_id)
+        return NextResponse.json({ error: 'No org' }, { status: 403 });
 
       const { data: inv, error: fetchErr } = await supabase
         .from('invitations')
@@ -79,4 +82,3 @@ function extractId(req: Request, params?: { id?: string }) {
     }
   );
 }
-``
