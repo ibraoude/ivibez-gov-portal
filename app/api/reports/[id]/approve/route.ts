@@ -1,7 +1,7 @@
 
 // app/api/reports/[id]/approve/route.ts
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 
@@ -13,35 +13,42 @@ function extractId(req: Request, params?: { id?: string }) {
   try {
     const url = new URL(req.url);
     const parts = url.pathname.split("/").filter(Boolean);
-    // [..., "reports", "<id>", "approve"]
     const idx = parts.findIndex((p) => p === "reports");
     if (idx >= 0 && parts[idx + 1]) return parts[idx + 1];
   } catch {}
   return null;
 }
 
-export async function POST(req: Request, ctx: { params?: { id?: string } }) {
+export async function POST(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const params = await context.params;
+
   return secureRoute(
     req,
     {
-      // Approvals are internal: no captcha
       requireCaptcha: false,
       requireOrg: true,
       requiredRoles: ["admin", "manager"],
       logCaptcha: false,
     },
     async ({ user, profile, supabase }) => {
-      // ---- resolve id & org ----
-      const reportId = extractId(req, ctx?.params);
+      const reportId = extractId(req, params);
+
       if (!reportId) {
         return NextResponse.json({ error: "Missing report id" }, { status: 400 });
       }
+
       if (!profile.org_id) {
-        return NextResponse.json({ error: "User not attached to organization" }, { status: 403 });
+        return NextResponse.json(
+          { error: "User not attached to organization" },
+          { status: 403 }
+        );
       }
+
       const orgId = profile.org_id;
 
-      // ---- 1) Load report (tenant-scoped) ----
       const { data: report, error: fetchErr } = await supabase
         .from("reports")
         .select("*")
@@ -52,9 +59,11 @@ export async function POST(req: Request, ctx: { params?: { id?: string } }) {
       if (fetchErr) {
         return NextResponse.json({ error: fetchErr.message }, { status: 400 });
       }
+
       if (!report) {
         return NextResponse.json({ error: "Report not found" }, { status: 404 });
       }
+
       if (report.status !== "draft") {
         return NextResponse.json(
           { error: "Only draft reports can be approved" },
@@ -62,22 +71,22 @@ export async function POST(req: Request, ctx: { params?: { id?: string } }) {
         );
       }
 
-      // ---- 2) Compute checksum via RPC ----
       const { data: checksumVal, error: checksumErr } = await supabase.rpc(
         "report_checksum_sha256",
         { payload: report.snapshot }
       );
+
       if (checksumErr) {
         return NextResponse.json({ error: checksumErr.message }, { status: 400 });
       }
 
-      // ---- 3) Approve & lock ----
       const now = new Date().toISOString();
+
       const { data: updated, error: updErr } = await supabase
         .from("reports")
         .update({
           status: "locked",
-          approved_by: user.id,   // UUID (auth.users.id)
+          approved_by: user.id,
           approved_at: now,
           locked_at: now,
           checksum: checksumVal ?? null,
@@ -94,7 +103,6 @@ export async function POST(req: Request, ctx: { params?: { id?: string } }) {
         );
       }
 
-      // ---- 4) Audit (non-blocking) ----
       try {
         await logAudit({
           supabase,
@@ -109,12 +117,12 @@ export async function POST(req: Request, ctx: { params?: { id?: string } }) {
             checksum: updated.checksum,
           },
         });
-      } catch {
-        // ignore audit failures
-      }
+      } catch {}
 
-      return NextResponse.json({ success: true, report: updated }, { status: 200 });
+      return NextResponse.json(
+        { success: true, report: updated },
+        { status: 200 }
+      );
     }
   );
 }
-``
