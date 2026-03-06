@@ -83,34 +83,42 @@ export default function Signup() {
   ============================== */
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!key || !address1Ref.current) return;
 
-    setOptions({ key, v: 'weekly' });
+    if (!key) return;
 
-    importLibrary('places').then((lib: any) => {
-      const autocomplete = new lib.Autocomplete(address1Ref.current!, {
-        fields: ['address_components'],
-        types: ['address'],
+    const input = address1Ref.current;
+
+    // ensure the ref exists and is an input element
+    if (!(input instanceof HTMLInputElement)) return;
+
+    setOptions({ key, v: "weekly" });
+
+    importLibrary("places").then((lib: any) => {
+      if (!(address1Ref.current instanceof HTMLInputElement)) return;
+
+      const autocomplete = new lib.Autocomplete(address1Ref.current, {
+        fields: ["address_components"],
+        types: ["address"],
       });
 
-      autocomplete.addListener('place_changed', () => {
+      autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace();
         const comps = place.address_components || [];
 
         const get = (type: string) =>
-          comps.find((c: any) => c.types.includes(type))?.long_name || '';
+          comps.find((c: any) => c.types.includes(type))?.long_name || "";
 
         const getShort = (type: string) =>
-          comps.find((c: any) => c.types.includes(type))?.short_name || '';
+          comps.find((c: any) => c.types.includes(type))?.short_name || "";
 
-        setFormData(prev => ({
+        setFormData((prev) => ({
           ...prev,
-          address_line1: `${get('street_number')} ${get('route')}`.trim(),
-          city: get('locality') || get('postal_town'),
-          state: getShort('administrative_area_level_1'),
-          postal_code: get('postal_code'),
-          country: get('country') || 'United States',
-          country_code: getShort('country') || 'US',
+          address_line1: `${get("street_number")} ${get("route")}`.trim(),
+          city: get("locality") || get("postal_town"),
+          state: getShort("administrative_area_level_1"),
+          postal_code: get("postal_code"),
+          country: get("country") || "United States",
+          country_code: getShort("country") || "US",
         }));
       });
     });

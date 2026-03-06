@@ -15,7 +15,10 @@ function extractId(req: Request, params?: { id?: string }) {
   return null;
 }
 
-export async function POST(req: Request, ctx: { params?: { id?: string } }) {
+  export async function POST(
+    req: Request,
+    { params }: { params: { id: string } }
+  ) {
   return secureRoute(
     req,
     {
@@ -25,7 +28,7 @@ export async function POST(req: Request, ctx: { params?: { id?: string } }) {
       logCaptcha: false,
     },
     async ({ supabase, profile, user }) => {
-      const id = extractId(req, ctx?.params);
+      const id = extractId(req, params);
       if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
       if (!profile.org_id) return NextResponse.json({ error: 'No org' }, { status: 403 });
 
