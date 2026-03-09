@@ -1,11 +1,11 @@
 
-import { NextResponse } from "next/server";
+import {NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/types/database";
 import { secureRoute } from "@/lib/security/secure-route";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {
