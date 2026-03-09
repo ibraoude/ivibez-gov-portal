@@ -1,9 +1,15 @@
 
 // app/api/reports/[id]/download/route.ts
-import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
+
+type RouteContext = {
+  params: {
+    id: string;
+  };
+};
+
 
 /** Convert an array of homogeneous objects to CSV (UTF‑8, quoted, header row). */
 function toCSV(rows: any[]): string {
@@ -39,25 +45,29 @@ function toCSV(rows: any[]): string {
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, context: RouteContext) {
+  const { id } = context.params;
+
   return secureRoute(
     req,
     {
-      requireCaptcha: false,            // internal download; no captcha by default
-      requireOrg: true,                 // must belong to an org
-      requiredRoles: [],                // allow any org role; change to ["admin","manager","auditor"] if desired
+      requireCaptcha: false,
+      requireOrg: true,
+      requiredRoles: [],
       logCaptcha: false,
     },
     async ({ supabase, profile, user }) => {
-      const reportId = params.id;
+
+      const reportId = id;
+
       if (!reportId) {
         return NextResponse.json({ error: "Missing report id" }, { status: 400 });
       }
 
-      // Narrow org_id (string | null -> string)
       if (!profile.org_id) {
         return NextResponse.json({ error: "User not attached to organization" }, { status: 403 });
       }
+
       const orgId = profile.org_id;
 
       const url = new URL(req.url);
