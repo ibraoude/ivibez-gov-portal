@@ -1,9 +1,13 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
+
+type OrganizationInsert =
+  Database['public']['Tables']['organizations']['Insert'];
 
 type Organization = {
   id: string;
@@ -85,7 +89,7 @@ export default function NewOrganizationPage() {
     })();
   }, [router]);
 
-  const canSubmit = useMemo(() => form.name.trim().length > 0, [form.name]);
+  const canSubmit = form.name.trim().length > 0;
 
   async function createOrg() {
     if (!me) return;
@@ -98,26 +102,30 @@ export default function NewOrganizationPage() {
     setLoading(true);
     setMsg(null);
 
-    const payload: Partial<Organization> = {
+    const payload: OrganizationInsert = {
       name: form.name.trim(),
-      legal_name: form.legal_name?.trim() || null,
-      email: form.email?.trim() || null,
-      agency_type: form.agency_type?.trim() || null,
-      gov_domain: form.gov_domain?.trim() || null,
-      website: form.website?.trim() || null,
-      address_line1: form.address_line1?.trim() || null,
-      address_line2: form.address_line2?.trim() || null,
-      city: form.city?.trim() || null,
-      state: form.state?.trim() || null,
-      postal_code: form.postal_code?.trim() || null,
-      country: form.country?.trim() || null,
+      created_by: me.id,
       allow_self_registration: false,
       require_admin_approval: true,
-      created_by: me.id,
       updated_at: new Date().toISOString(),
+      legal_name: form.legal_name || null,
+      email: form.email || null,
+      agency_type: form.agency_type || null,
+      gov_domain: form.gov_domain || null,
+      website: form.website || null,
+      address_line1: form.address_line1 || null,
+      address_line2: form.address_line2 || null,
+      city: form.city || null,
+      state: form.state || null,
+      postal_code: form.postal_code || null,
+      country: form.country || null,
     };
 
-    const { error } = await supabase.from('organizations').insert(payload).single();
+    const { error } = await supabase
+  .from('organizations')
+  .insert([payload])
+  .select()
+  .single();
     setLoading(false);
 
     if (error) {

@@ -1,6 +1,7 @@
 
 // app/api/members/remove/route.ts
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 
@@ -9,7 +10,7 @@ export const runtime = "nodejs";
 // UUID quick check (optional)
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {

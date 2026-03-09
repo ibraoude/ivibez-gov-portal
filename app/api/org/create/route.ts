@@ -1,7 +1,8 @@
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
+import { NextRequest } from "next/server";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {
@@ -13,19 +14,48 @@ export async function POST(req: Request) {
     },
     async ({ user, supabase, body, captcha }) => {
 
-      const orgName = body.orgName?.trim();
-      if (!orgName) throw new Error("orgName required");
+      const orgName = String(body?.orgName || "").trim();
 
-      const { data: org } = await supabase
+      if (!orgName) {
+        throw new Error("orgName required");
+      }
+
+      /* ===============================
+         CREATE ORGANIZATION
+      =============================== */
+
+      const { data: org, error: orgError } = await supabase
         .from("organizations")
-        .insert({ name: orgName, created_by: user.id })
+        .insert({
+          name: orgName,
+          created_by: user.id,
+        })
         .select()
         .single();
 
-      await supabase
+      if (orgError || !org) {
+        throw new Error(orgError?.message || "Failed to create organization");
+      }
+
+      /* ===============================
+         ATTACH USER AS OWNER
+      =============================== */
+
+      const { error: profileError } = await supabase
         .from("profiles")
-        .update({ org_id: org.id, role: "owner" })
+        .update({
+          org_id: org.id,
+          role: "owner",
+        })
         .eq("id", user.id);
+
+      if (profileError) {
+        throw new Error(profileError.message);
+      }
+
+      /* ===============================
+         AUDIT LOG
+      =============================== */
 
       await logAudit({
         supabase,
@@ -34,10 +64,15 @@ export async function POST(req: Request) {
         action: "org_created",
         entity_type: "organization",
         entity_id: org.id,
-        metadata: { captcha_score: captcha.score },
+        metadata: {
+          captcha_score: captcha?.score ?? null,
+        },
       });
 
-      return { success: true, org_id: org.id };
+      return {
+        success: true,
+        org_id: org.id,
+      };
     }
   );
 }

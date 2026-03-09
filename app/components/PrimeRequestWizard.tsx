@@ -1,12 +1,12 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { getRecaptchaToken } from '@/lib/security/recaptcha-client';
 import { Shield, Landmark, Building2, CheckCircle, AlertTriangle } from 'lucide-react';
-
+import type { User } from '@supabase/supabase-js';
 import { FederalForm } from '@/app/components/gov-forms/FederalForm';
 import { StateForm } from '@/app/components/gov-forms/StateForm';
 import { LocalForm } from '@/app/components/gov-forms/LocalForm';
@@ -24,7 +24,7 @@ export default function PrimeRequestWizard({
 }) {
   const router = useRouter();
 
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
 
   const [step, setStep] = useState<Step>(1);
   const [govType, setGovType] = useState<GovType>(null);
@@ -62,47 +62,42 @@ export default function PrimeRequestWizard({
   const back = () => setStep((p) => (p > 1 ? ((p - 1) as Step) : p));
 
   // Extract a title/description for table preview & dashboard
-  const extracted = useMemo(() => {
-    if (!govType) return { title: '', description: '' };
+  let extracted = { title: '', description: '' };
 
-    if (govType === 'federal') {
-      return {
-        title: formData?.projectTitle || formData?.agencyName || 'Federal Request',
-        description: formData?.description || '',
-      };
-    }
-    if (govType === 'state') {
-      return {
-        title: formData?.projectTitle || formData?.agencyName || 'State Request',
-        description: formData?.description || '',
-      };
-    }
-    return {
+  if (govType === 'federal') {
+    extracted = {
+      title: formData?.projectTitle || formData?.agencyName || 'Federal Request',
+      description: formData?.description || '',
+    };
+  } else if (govType === 'state') {
+    extracted = {
+      title: formData?.projectTitle || formData?.agencyName || 'State Request',
+      description: formData?.description || '',
+    };
+  } else if (govType === 'local') {
+    extracted = {
       title: formData?.projectName || formData?.municipality || 'Local Request',
       description: formData?.description || '',
     };
-  }, [govType, formData]);
+  }
 
-  const canContinueStep2 = useMemo(() => {
-    if (!govType) return false;
+  let canContinueStep2 = false;
 
-    // enforce required fields based on your original specs
-    if (govType === 'federal') {
-      return Boolean(
-        formData?.coName?.trim() && formData?.officialEmail?.trim() && formData?.description?.trim()
-      );
-    }
-    if (govType === 'state') {
-      return Boolean(
-        formData?.procurementOfficer?.trim() && formData?.email?.trim() && formData?.description?.trim()
-      );
-    }
-    if (govType === 'local') {
-      return Boolean(formData?.description?.trim());
-    }
-    return false;
-  }, [govType, formData]);
-
+  if (govType === 'federal') {
+    canContinueStep2 = Boolean(
+      formData?.coName?.trim() &&
+      formData?.officialEmail?.trim() &&
+      formData?.description?.trim()
+    );
+  } else if (govType === 'state') {
+    canContinueStep2 = Boolean(
+      formData?.procurementOfficer?.trim() &&
+      formData?.email?.trim() &&
+      formData?.description?.trim()
+    );
+  } else if (govType === 'local') {
+    canContinueStep2 = Boolean(formData?.description?.trim());
+  }
   async function handleSubmit() {
     if (!user || !govType) return;
 
@@ -199,14 +194,19 @@ export default function PrimeRequestWizard({
 
       setTrackingId(result.trackingId);
       setStep(4);
-    } catch (e: any) {
-      setSubmitError(e.message || 'Failed to submit request.');
-    } finally {
-      setSubmitting(false);
-    }
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'Failed to submit request.';
+        setSubmitError(message);
+      }
   }
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center py-20 text-gray-500">
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 py-12 px-6">

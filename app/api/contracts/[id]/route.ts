@@ -1,14 +1,16 @@
 
 // app/api/contracts/[id]/route.ts
 import { NextResponse } from "next/server";
+import { IdRouteContext } from "@/lib/types/route-context";
+import { NextRequest } from "next/server";
 import type { Database } from "@/types/database";
 import { secureRoute } from "@/lib/security/secure-route";
 
 export const runtime = "nodejs";
 
-export async function PUT(req: Request,
-  context: { params: Promise<{ id: string }> }) {
-  const { id } = await context.params; // ✅ await it
+export async function PUT(req: NextRequest, context: IdRouteContext
+) {
+  const { id } = await context.params;
 
   return secureRoute(
     req,
@@ -16,7 +18,7 @@ export async function PUT(req: Request,
       expectedAction: "contract_update",
       requireCaptcha: true,
       requireOrg: true,
-      requiredRoles: ["admin", "owner", "super_admin"], // adjust to your model
+      requiredRoles: ["admin", "owner", "super_admin"],
       logCaptcha: true,
     },
     async ({ supabase, profile, body, formData }) => {

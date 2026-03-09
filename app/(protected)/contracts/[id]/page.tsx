@@ -1,10 +1,11 @@
 
+// app/(protected)/contracts/[id]/edit/page.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { supabase } from "@/lib/supabase"; // browser client instance (anon key)
+import { createClient } from "@/lib/supabase/client"; // browser client factory
 import { getRecaptchaToken } from "@/lib/security/recaptcha-client";
 import { FileSignature, DollarSign, CalendarRange, Users, Upload } from "lucide-react";
 
@@ -24,8 +25,13 @@ type FormState = {
 
 export default function EditContractPage() {
   const router = useRouter();
-  const { id } = useParams<{ id: string }>();
+  const supabase = createClient();
 
+  // In the App Router, useParams() returns a record of route params (string | string[]).
+  const params = useParams() as { id: string };
+  const id = params.id;
+
+  // ✅ Hooks declared at the top level (unconditional)
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -61,9 +67,11 @@ export default function EditContractPage() {
   // Prefill from Supabase (client-side read)
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
         setLoading(true);
+
         const { data, error } = await supabase
           .from("contracts")
           .select(
@@ -97,10 +105,11 @@ export default function EditContractPage() {
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, supabase]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -119,11 +128,10 @@ export default function EditContractPage() {
       // 1) Captcha v3
       const captchaToken = await getRecaptchaToken("contract_update");
 
-      // 2) Build multipart body
+      // 2) Build multipart body for your /api/contracts/[id] PUT handler
       const body = new FormData();
-      body.set("captchaToken", captchaToken); // secure-route checks both captchaToken/recaptchaToken
+      body.set("captchaToken", captchaToken); // server may accept "captchaToken" or "recaptchaToken"
 
-      // Only include fields the update API expects
       body.set("contract_number", form.contract_number ?? "");
       body.set("source_type", form.source_type ?? "manual");
       body.set("gov_type", form.gov_type ?? "");
@@ -145,10 +153,11 @@ export default function EditContractPage() {
         body,
       });
 
-      const json = await res.json();
+      const text = await res.text();
+      const json = safeParseJSON(text);
       if (!res.ok) {
-        console.error("UPDATE ERROR:", json);
-        alert(JSON.stringify(json));
+        console.error("UPDATE ERROR:", json || text);
+        alert(typeof json === "object" && json ? JSON.stringify(json) : text || "Update failed");
         return;
       }
 
@@ -161,6 +170,7 @@ export default function EditContractPage() {
     }
   }
 
+  // ✅ Early returns happen AFTER hooks—this is valid
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 px-6 py-12 dark:bg-black">
@@ -438,4 +448,12 @@ function Select({
     </div>
   );
 }
-``
+
+/** Safe JSON parse helper */
+function safeParseJSON(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}

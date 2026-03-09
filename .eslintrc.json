@@ -1,0 +1,9 @@
+
+{
+  "plugins": ["react-hooks"],
+  "extends": [],
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",      // 🔴 exact location of violations
+    "react-hooks/exhaustive-deps": "warn"
+  }
+}

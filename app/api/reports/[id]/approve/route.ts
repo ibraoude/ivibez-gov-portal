@@ -2,13 +2,14 @@
 // app/api/reports/[id]/approve/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
+import { IdRouteContext } from "@/lib/types/route-context";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 
 export const runtime = "nodejs";
 
 /** Helper to recover id if `params` is missing/misbound */
-function extractId(req: Request, params?: { id?: string }) {
+function extractId(req: NextRequest, params?: { id?: string }) {
   if (params?.id && typeof params.id === "string") return params.id;
   try {
     const url = new URL(req.url);
@@ -21,7 +22,7 @@ function extractId(req: Request, params?: { id?: string }) {
 
 export async function POST(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: IdRouteContext
 ) {
   const params = await context.params;
 

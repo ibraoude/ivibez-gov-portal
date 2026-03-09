@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
@@ -141,25 +141,35 @@ export default function MembersPage() {
   ];
 
   // Debounced loader for typing search
-  const debouncedLoad = useMemo(() => debounce((reset = false) => loadMembers(reset), 300), []); // eslint-disable-line
+  const debouncedLoadRef = useRef<((reset?: boolean) => void) | null>(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        if (!authData?.user) {
-          router.push('/login');
-          return;
-        }
+    debouncedLoadRef.current = debounce((reset = false) => loadMembers(reset), 300);
+  }, []);
+
+  useEffect(() => {
+  (async () => {
+    try {
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+
+      if (!session) {
+        // Do nothing — proxy handles authentication
+        setLoading(false);
+        return;
+      }
+
+      const authUser = session.user;
 
         // Get caller's profile: id, role, org_id
         const { data: p } = await supabase
           .from('profiles')
           .select('id, role, org_id')
-          .eq('id', authData.user.id)
+          .eq('id', authUser.id)
           .single();
 
-        setMyUserId(p?.id ?? authData.user.id);
+        setMyUserId(p?.id ?? authUser.id);
         setMyRole((p?.role ?? 'viewer') as Role);
         setMyOrgId(p?.org_id ?? null);
 
@@ -168,9 +178,11 @@ export default function MembersPage() {
         // Optional realtime: refresh on profile changes
         const channel = supabase
           .channel('members_realtime')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
-            loadMembers(false);
-          })
+          .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profiles' },
+          () => void loadMembers(false)
+        )
           .subscribe();
         channelRef.current = channel;
       } finally {
@@ -184,78 +196,107 @@ export default function MembersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadMembers(reset = false) {
-    setLoadingList(true);
-    setSelected([]);
-    try {
-      const currentPage = reset ? 1 : page;
-      const from = (currentPage - 1) * pageSize;
-      const to = from + pageSize - 1;
+    // 1) Change signature
+    async function loadMembers(
+      reset = false,
+      overrides?: Partial<{
+        orgId: string | null;
+        showUnassigned: boolean;
+        roleFilter: Role | '';
+        search: string;
+        sortKey: SortKey;
+        sortDir: 'asc' | 'desc';
+        page: number;
+        pageSize: number;
+      }>
+    ) {
+      setLoadingList(true);
+      setSelected([]);
 
-      // RLS-safe: server-side filters and paging
-      let query = supabase
-        .from('profiles')
-        .select('id, email, role, org_id, first_name, last_name, created_at, updated_at', { count: 'exact' });
+      try {
+        const currentPage = overrides?.page ?? (reset ? 1 : Math.max(1, page));
+        const effPageSize = overrides?.pageSize ?? pageSize;
+        const from = (currentPage - 1) * effPageSize;
+        const to = from + effPageSize - 1;
 
-      // Exclude unassigned by default
-      if (!showUnassigned) {
-        query = query.not('org_id', 'is', null);
-      }
+        const orgId = overrides?.orgId ?? myOrgId;
+        const includeUnassigned = overrides?.showUnassigned ?? showUnassigned;
+        const effRoleFilter = overrides?.roleFilter ?? roleFilter;
+        const effSearch = overrides?.search ?? search;
+        const effSortKey = overrides?.sortKey ?? sortKey;
+        const effSortDir = overrides?.sortDir ?? sortDir;
 
-      if (roleFilter) query = query.eq('role', roleFilter);
+        let query = supabase
+          .from('profiles')
+          .select(
+            'id, email, role, org_id, first_name, last_name, created_at, updated_at',
+            { count: 'exact' }
+          );
 
-      // Server-side: only ilike email (name is computed client-side)
-      if (search.trim()) {
-        const term = search.trim().replace(/[%_]/g, (m) => '\\' + m);
-        query = query.ilike('email', `%${term}%`);
-      }
-
-      // Basic server sort (no computed "name" on server)
-      const serverSortMap: Record<SortKey, string> = {
-        name: 'created_at', // will re-sort client-side for name
-        email: 'email',
-        role: 'role',
-        created_at: 'created_at',
-        updated_at: 'updated_at',
-      };
-      query = query.order(serverSortMap[sortKey] || 'created_at', { ascending: sortDir === 'asc' });
-
-      // Range for paging
-      query = query.range(from, to);
-
-      const { data, error, count } = await query;
-      if (error) {
-        console.error('profiles fetch error:', error.message);
-        setRows([]);
-        setTotal(0);
-      } else {
-        let list = (data as MemberRow[]) ?? [];
-
-        // If searching name, filter client-side by first/last
-        if (search.trim()) {
-          const q = search.trim().toLowerCase();
-          list = list.filter((m) => matchesSearch(m, q));
+        // org/unassigned
+        if (orgId) {
+          if (includeUnassigned) {
+            query = query.or(`org_id.eq.${orgId},org_id.is.null`);
+          } else {
+            query = query.eq('org_id', orgId);
+          }
+        } else {
+          if (!includeUnassigned) query = query.is('org_id', null);
         }
 
-        // Client sort by "name" if requested
-        if (sortKey === 'name') {
-          list = [...list].sort((a, b) => {
-            const an = fullName(a).toLowerCase();
-            const bn = fullName(b).toLowerCase();
-            if (an < bn) return sortDir === 'asc' ? -1 : 1;
-            if (an > bn) return sortDir === 'asc' ? 1 : -1;
-            return 0;
-          });
+        if (effRoleFilter) query = query.eq('role', effRoleFilter);
+        if (effSearch.trim()) {
+          const term = effSearch.trim().replace(/[%_]/g, (m) => '\\' + m);
+          query = query.ilike('email', `%${term}%`);
         }
 
-        setRows(list);
-        setTotal(count ?? list.length);
-        if (reset) setPage(1);
+        const serverSortMap: Record<SortKey, string> = {
+          name: 'created_at',
+          email: 'email',
+          role: 'role',
+          created_at: 'created_at',
+          updated_at: 'updated_at',
+        };
+        query = query.order(serverSortMap[effSortKey] || 'created_at', {
+          ascending: effSortDir === 'asc',
+        });
+
+        query = query.range(from, to);
+
+        const { data, error, count } = await query.returns<MemberRow[]>();
+
+        if (error) {
+          console.error('profiles fetch error:', error.message);
+          setRows([]);
+          setTotal(0);
+        } else {
+          let list = data ?? [];
+
+          if (effSearch.trim()) {
+            const q = effSearch.trim().toLowerCase();
+            list = list.filter((m) => matchesSearch(m, q));
+          }
+
+          if (effSortKey === 'name') {
+            list = [...list].sort((a, b) => {
+              const an = fullName(a).toLowerCase();
+              const bn = fullName(b).toLowerCase();
+              if (an < bn) return effSortDir === 'asc' ? -1 : 1;
+              if (an > bn) return effSortDir === 'asc' ? 1 : -1;
+              return 0;
+            });
+          }
+
+          setRows(list);
+          setTotal(count ?? list.length);
+          if (reset) setPage(1);
+        }
+      } finally {
+        setLoadingList(false);
       }
-    } finally {
-      setLoadingList(false);
     }
-  }
+
+
 
   /* ===================== Actions ===================== */
 
@@ -418,11 +459,8 @@ export default function MembersPage() {
     void loadMembers(false);
   }
 
-  const currentPageRows = useMemo(() => {
-    // We already requested a specific server range; this mirrors the render window
-    const start = (page - 1) * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [rows, page, pageSize]);
+  const start = (page - 1) * pageSize;
+  const currentPageRows = rows;
 
   /* ===================== Render ===================== */
 
@@ -496,7 +534,7 @@ export default function MembersPage() {
                 onChange={(e) => {
                   setSearch(e.target.value);
                   // Use debounced requery as user types; or remove and rely on "Apply"
-                  debouncedLoad(true);
+                  debouncedLoadRef.current?.(true);
                 }}
                 placeholder="Search name or email…"
                 className="w-full bg-transparent outline-none"

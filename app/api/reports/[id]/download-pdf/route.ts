@@ -1,7 +1,8 @@
 
 // app/api/reports/[id]/download-pdf/route.ts
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { IdRouteContext } from "@/lib/types/route-context";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
@@ -12,7 +13,7 @@ import path from "path";
 export const runtime = "nodejs";
 
 // Helper to recover id if `params` is missing/misbound
-function extractId(req: Request, params?: { id?: string }) {
+function extractId(req: NextRequest, params?: { id?: string }) {
   if (params?.id && typeof params.id === "string") return params.id;
   try {
     const url = new URL(req.url);
@@ -38,7 +39,11 @@ function signPayload(payload: string) {
   return crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
-export async function GET(req: Request, ctx: { params?: { id?: string } }) {
+export async function POST(
+  req: NextRequest,
+  context: IdRouteContext
+) {
+  const params = await context.params;
   return secureRoute(
     req,
     {
@@ -48,7 +53,7 @@ export async function GET(req: Request, ctx: { params?: { id?: string } }) {
       logCaptcha: false,
     },
     async ({ supabase, profile, user }) => {
-      const reportId = extractId(req, ctx?.params);
+      const reportId = extractId(req, params);
       if (!reportId) {
         return NextResponse.json({ error: "Missing report id" }, { status: 400 });
       }
@@ -198,5 +203,3 @@ export async function GET(req: Request, ctx: { params?: { id?: string } }) {
     }
   );
 }
-
-export const POST = GET;

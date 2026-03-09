@@ -1,6 +1,7 @@
 
 // app/api/requests/submit/route.ts
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import type { Database } from "@/types/database";
 import { secureRoute } from "@/lib/security/secure-route";
 
@@ -14,7 +15,7 @@ function localTrackingId(prefix = "REQ") {
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {

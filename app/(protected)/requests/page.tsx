@@ -1,10 +1,11 @@
-
+//app/(protected)/requests/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client'
+const supabase = createClient();
 import {
   FileText,
   Clock,
@@ -57,7 +58,7 @@ interface GovernmentContract {
   } | null;
 }
 
-export default function Dashboard() {
+export default function RequestsPage() {
   const router = useRouter();
 
   const [user, setUser] = useState<AppUser | null>(null);
@@ -83,27 +84,31 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError || !authData.user) {
-          router.push('/login');
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData.session;
+
+        if (!session) {
+          router.replace(`/login?returnTo=/requests`);
           return;
         }
+
+        const authUser = session.user;
 
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('role, org_id')
-          .eq('id', authData.user.id)
+          .eq('id', authUser.id)
           .single();
 
         if (profileError || !profile) {
           console.error('Profile not found:', profileError);
-          router.push('/login');
+          router.replace(`/login?returnTo=${encodeURIComponent('/requests')}`);
           return;
         }
 
         setUser({
-          id: authData.user.id,
-          email: authData.user.email!,
+          id: authUser.id,
+          email: authUser.email!,
           role: (profile.role ?? 'client') as Role,
           org_id: profile.org_id ?? null,
         });
@@ -118,13 +123,16 @@ export default function Dashboard() {
   async function fetchRequests() {
     try {
       const { data, error } = await supabase
-        .from('service_requests')
-        .select('id,tracking_id,gov_type,status,title,created_at,awarded')
-        .order('created_at', { ascending: false });
+        .from("service_requests")
+        .select("id,tracking_id,gov_type,status,title,created_at,awarded")
+        .order("created_at", { ascending: false })
+        .returns<ServiceRequest[]>();   // ✅ FIX
+
       if (error) throw error;
+
       setRequests(data || []);
     } catch (e) {
-      console.error('Error fetching requests:', e);
+      console.error("Error fetching requests:", e);
       setRequests([]);
     }
   }
@@ -224,9 +232,7 @@ export default function Dashboard() {
   const behindScheduleCount = contracts.filter(behindSchedule).length;
 
   // Filters
-  const filteredContracts = useMemo(
-    () =>
-      contracts.filter((c) => {
+  const filteredContracts = contracts.filter((c) => {
         const idMatch =
           !filters.contractId ||
           (c.contract_number || c.service_requests?.tracking_id || '')
@@ -240,10 +246,7 @@ export default function Dashboard() {
         const endMatch = !filters.endDate || (cDate && cDate <= new Date(filters.endDate));
 
         return idMatch && govMatch && statusMatch && startMatch && endMatch;
-      }),
-    [contracts, filters]
-  );
-
+      });
   /* ---------- actions ---------- */
 
   async function updateContractAmount(id: string) {
@@ -332,7 +335,7 @@ export default function Dashboard() {
       const { data: session } = await supabase.auth.getSession();
       const token = session.session?.access_token;
       if (!token) {
-        router.push("/login");
+        router.replace('/login');
         return;
       }
 
@@ -358,12 +361,17 @@ export default function Dashboard() {
     try {
       await supabase.auth.signOut();
     } finally {
-      router.push('/login');
+      router.replace('/login');
     }
   }
 
-  if (!user) return null;
+  if (loading) {
+    return <div className="p-6">Loading...</div>;
+  }
 
+  if (!user) {
+    return <div className="p-6">No user found</div>;
+  }
   const firstName = user.email?.split('@')[0] ?? 'User';
 
   return (
@@ -629,7 +637,7 @@ export default function Dashboard() {
                           )}
                         </div>
 
-                        {/*{/* Actions */}
+                        {/* Actions */}
                         <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                          
                           <Link

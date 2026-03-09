@@ -1,9 +1,10 @@
 
+// app/(protected)/awards/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Award as AwardIcon,
@@ -59,6 +60,14 @@ type SortKey =
   | "status"
   | "admin_status";
 
+type HistoryEntry = {
+  id: string;
+  stage: string;
+  note?: string | null;
+  actor_email?: string | null;
+  created_at: string;
+};
+
 /* ===================== Styling helpers ===================== */
 
 const statusStyles: Record<ServiceStatus, string> = {
@@ -93,6 +102,7 @@ const adminStyles: Record<AdminStatus, string> = {
 
 export default function AdminRequestsPage() {
   const router = useRouter();
+  const supabase = createClient();
 
   // Role
   const [checking, setChecking] = useState(true);
@@ -120,9 +130,7 @@ export default function AdminRequestsPage() {
 
   // Drawer
   const [drawerId, setDrawerId] = useState<string | null>(null);
-  const [history, setHistory] = useState<
-    { id: string; stage: string; note?: string | null; actor_email?: string | null; created_at: string }[]
-  >([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Toast
@@ -146,8 +154,8 @@ export default function AdminRequestsPage() {
         const { data: profile, error: pErr } = await supabase
           .from("profiles")
           .select("role")
-          .eq("id", data.user.id)
-          .single();
+          .or(`id.eq.${data.user.id},user_id.eq.${data.user.id}`)
+          .maybeSingle();
 
         if (pErr || !profile) {
           setIsAdmin(false);
@@ -176,7 +184,8 @@ export default function AdminRequestsPage() {
     return () => {
       if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, [router]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   /* ===================== RLS‑safe loader (server-side paging/filter) ===================== */
 
@@ -203,14 +212,12 @@ export default function AdminRequestsPage() {
       if (statusFilter !== "all") query = query.eq("status", statusFilter);
       if (search.trim()) {
         const term = escapeLike(search.trim());
-        // Search tracking_id, title, requester_email
         query = query.or(
           `tracking_id.ilike.%${term}%,title.ilike.%${term}%,requester_email.ilike.%${term}%`,
           { referencedTable: "service_requests" }
         );
       }
 
-      // Sort: map UI sort columns to server columns where possible
       const sortableColumns: Partial<Record<SortKey, string>> = {
         created_at: "created_at",
         tracking_id: "tracking_id",
@@ -218,13 +225,11 @@ export default function AdminRequestsPage() {
         requester_email: "requester_email",
         status: "status",
         admin_status: "admin_status",
-        // title can be heavy to sort on; include anyway
         title: "title",
       };
       const serverCol = sortableColumns[sortKey] ?? "created_at";
       query = query.order(serverCol, { ascending: sortDir === "asc" });
 
-      // Range for paging
       query = query.range(from, to);
 
       const { data, error, count } = await query;
@@ -271,7 +276,7 @@ export default function AdminRequestsPage() {
       const { error } = await supabase
         .from("service_requests")
         .update({ status, updated_at: new Date().toISOString() })
-        .eq("id", id); // RLS decides if allowed
+        .eq("id", id);
       if (error) showToast(error.message || "Failed to update status", "error");
       else showToast("Status updated", "success");
     } finally {
@@ -294,7 +299,7 @@ export default function AdminRequestsPage() {
         return;
       }
 
-      // If switching to 'awarded', call secure server route (RLS + role on server)
+      // If switching to 'awarded', call secure server route
       if (newAdminStatus === "awarded" && !request.awarded) {
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token;
@@ -302,12 +307,12 @@ export default function AdminRequestsPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            Authorization: `Bearer ${token}`,
+            "X-Request-ID": crypto.randomUUID(),
           },
           body: JSON.stringify({ requestId: id }),
         });
 
-        // Read text (then try JSON) to avoid "Unexpected end of JSON input"
         const bodyText = await res.text();
         if (!res.ok) {
           try {
@@ -332,7 +337,7 @@ export default function AdminRequestsPage() {
 
       if (updateError) showToast(updateError.message || "Failed to update admin stage", "error");
       else showToast("Admin stage updated", "success");
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       showToast("Unexpected error", "error");
     } finally {
@@ -341,7 +346,7 @@ export default function AdminRequestsPage() {
     }
   }
 
-  // Bulk: award selected via server route (each will pass RLS on server)
+  // Bulk: award selected via server route
   async function bulkAward() {
     if (!selected.length) return;
     setBulkBusy(true);
@@ -354,7 +359,8 @@ export default function AdminRequestsPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            Authorization: `Bearer ${token}`,
+            "X-Request-ID": crypto.randomUUID(),
           },
           body: JSON.stringify({ requestId: id }),
         });
@@ -368,16 +374,8 @@ export default function AdminRequestsPage() {
             showToast(t || `Award failed (${res.status})`, "error");
           }
         } else {
-          // best-effort local update; true state comes from reload
-          await supabase
-            .from("service_requests")
-            .update({
-              admin_status: "awarded",
-              awarded: true,
-              status: "completed",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id);
+          showToast("Contract awarded", "success");
+          await loadPage(false);
         }
       }
       showToast("Selected requests awarded", "success");
@@ -391,7 +389,7 @@ export default function AdminRequestsPage() {
     }
   }
 
-  // Bulk: close selected (RLS enforced)
+  // Bulk: close selected
   async function bulkClose() {
     if (!selected.length) return;
     setBulkBusy(true);
@@ -412,7 +410,7 @@ export default function AdminRequestsPage() {
     }
   }
 
-  /* ===================== Sorting (client only for secondary columns) ===================== */
+  /* ===================== Sorting ===================== */
 
   function onSort(col: SortKey) {
     if (col === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -420,34 +418,27 @@ export default function AdminRequestsPage() {
       setSortKey(col);
       setSortDir(col === "created_at" ? "desc" : "asc");
     }
-    // Ask server to re-load using mapped column where possible
     void loadPage(false);
   }
 
-  const filtered = useMemo(() => rows, [rows]); // server already filtered
-  const sorted = useMemo(() => {
-    // Server already sorts by the chosen column when possible;
-    // keep a client sort fallback for secondary keys or when equal.
-    const arr = [...filtered];
-    arr.sort((a: any, b: any) => {
-      const va = (a[sortKey] ?? "").toString().toLowerCase();
-      const vb = (b[sortKey] ?? "").toString().toLowerCase();
-      if (va < vb) return sortDir === "asc" ? -1 : 1;
-      if (va > vb) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
-    return arr;
-  }, [filtered, sortKey, sortDir]);
+  const filtered = rows;
+
+  const sorted = [...filtered];
+
+  sorted.sort((a: ReqRow, b: ReqRow) => {
+    const va = (a[sortKey] ?? "").toString().toLowerCase();
+    const vb = (b[sortKey] ?? "").toString().toLowerCase();
+
+    if (va < vb) return sortDir === "asc" ? -1 : 1;
+    if (va > vb) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, totalPages);
 
-  const pageRows = useMemo(() => {
-    // We already request a specific range from server;
-    // this slice just mirrors server paging for render safety.
-    const start = (currentPage - 1) * pageSize;
-    return sorted.slice(start, start + pageSize);
-  }, [sorted, currentPage, pageSize]);
+  const start = (currentPage - 1) * pageSize;
+  const pageRows = sorted.slice(start, start + pageSize);
 
   // Refresh to first page on filter changes
   useEffect(() => {
@@ -467,8 +458,10 @@ export default function AdminRequestsPage() {
         .from("service_request_activity")
         .select("id, stage, note, actor_email, created_at")
         .eq("request_id", id)
-        .order("created_at", { ascending: true });
-      if (!error && data) setHistory(data as any);
+        .order("created_at", { ascending: true })
+        .returns<HistoryEntry[]>();
+
+      if (!error && data) setHistory(data);
     } finally {
       setHistoryLoading(false);
     }
@@ -478,7 +471,7 @@ export default function AdminRequestsPage() {
     setHistory([]);
   }
 
-  /* ===================== CSV Export (current server-filtered set) ===================== */
+  /* ===================== CSV Export ===================== */
 
   function exportCSV() {
     const headers = [
@@ -520,6 +513,7 @@ export default function AdminRequestsPage() {
 
   /* ===================== Render ===================== */
 
+  // ✅ Early returns AFTER hooks — valid and safe
   if (checking) return null;
 
   return (
@@ -529,7 +523,9 @@ export default function AdminRequestsPage() {
         <div className="flex items-center justify-between border-b border-gray-200 bg-white/80 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-white/5 sm:px-6">
           <div>
             <h1 className="text-xl font-bold tracking-tight">Project Lifecycle Management</h1>
-            <p className="text-xs text-gray-600 dark:text-gray-400">Full‑screen console for awards & lifecycle.</p>
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              Full‑screen console for awards & lifecycle.
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -538,7 +534,9 @@ export default function AdminRequestsPage() {
               <Filter className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-400" />
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  setStatusFilter(e.target.value as "all" | ServiceStatus)
+                }
                 className="bg-transparent outline-none"
               >
                 <option value="all">All Statuses</option>
@@ -763,7 +761,8 @@ export default function AdminRequestsPage() {
                                           method: "POST",
                                           headers: {
                                             "Content-Type": "application/json",
-                                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                            Authorization: `Bearer ${token}`,
+                                            "X-Request-ID": crypto.randomUUID(),
                                           },
                                           body: JSON.stringify({ requestId: r.id }),
                                         });
@@ -959,7 +958,7 @@ export default function AdminRequestsPage() {
 
 /* ===================== Small Components ===================== */
 
-function Th({ children, className = "" }: any) {
+function Th({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${className}`}>{children}</th>;
 }
 
@@ -1058,14 +1057,17 @@ function formatDate(iso: string) {
     return iso;
   }
 }
+
 function labelize(val: string) {
   return val.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-function csvEscape(v: any) {
+
+function csvEscape(v: unknown) {
   const s = String(v ?? "");
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
-function sanitize(v: any) {
+function sanitize(v: unknown) {
   return String(v ?? "").replace(/\s+/g, " ").trim();
 }
+``

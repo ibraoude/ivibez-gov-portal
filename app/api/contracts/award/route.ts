@@ -1,11 +1,11 @@
+import { NextRequest, NextResponse } from "next/server";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return secureRoute(
-    
     req,
     {
       requireCaptcha: false,
@@ -14,6 +14,7 @@ export async function POST(req: Request) {
       logCaptcha: false,
     },
     async ({ user, profile, supabase, body }) => {
+
       // -------------------------------------------------------------------
       // 0) Validate org + requestId
       // -------------------------------------------------------------------
@@ -21,8 +22,8 @@ export async function POST(req: Request) {
       const orgId = profile?.org_id;
 
       if (!orgId) {
-        return new Response(
-          JSON.stringify({ error: "Organization required" }),
+        return NextResponse.json(
+          { error: "Organization required" },
           { status: 400 }
         );
       }
@@ -30,14 +31,14 @@ export async function POST(req: Request) {
       const { requestId } = body ?? {};
 
       if (!requestId || typeof requestId !== "string") {
-        return new Response(
-          JSON.stringify({ error: "Missing or invalid requestId" }),
+        return NextResponse.json(
+          { error: "Missing or invalid requestId" },
           { status: 400 }
         );
       }
 
       // -------------------------------------------------------------------
-      // 1) Fetch service request (tenant scoped)
+      // 1) Fetch service request
       // -------------------------------------------------------------------
 
       const { data: request, error: reqErr } = await supabase
@@ -48,14 +49,14 @@ export async function POST(req: Request) {
         .single();
 
       if (reqErr || !request) {
-        return new Response(
-          JSON.stringify({ error: "Request not found or not accessible" }),
+        return NextResponse.json(
+          { error: "Request not found or not accessible" },
           { status: 404 }
         );
       }
 
       // -------------------------------------------------------------------
-      // 2) If already awarded (idempotent)
+      // 2) Already awarded (idempotent)
       // -------------------------------------------------------------------
 
       if (request.awarded === true) {
@@ -66,12 +67,12 @@ export async function POST(req: Request) {
           .eq("org_id", orgId)
           .maybeSingle();
 
-        return {
+        return NextResponse.json({
           success: true,
           alreadyAwarded: true,
           contract_id: existingContract?.id ?? null,
           contract_number: existingContract?.contract_number ?? null,
-        };
+        });
       }
 
       // -------------------------------------------------------------------
@@ -100,13 +101,13 @@ export async function POST(req: Request) {
           .insert({
             org_id: orgId,
             contract_number: generatedNumber,
-            tracking_id: request.tracking_id,
+            tracking_id: request.tracking_id ?? "",
             source_request_id: request.id,
             source_type: "request",
-            owner_id: request.submitted_by,
-            gov_type: request.gov_type,
-            title: request.title,
-            description: request.description,
+            owner_id: request.submitted_by ?? user.id,
+            gov_type: request.gov_type ?? "CON",
+            title: request.title ?? "",
+            description: request.description ?? "",
             status: "active",
             progress_percentage: 0,
             awarded_by: user.id,
@@ -116,8 +117,8 @@ export async function POST(req: Request) {
           .single();
 
         if (insertErr) {
-          return new Response(
-            JSON.stringify({ error: insertErr.message }),
+          return NextResponse.json(
+            { error: insertErr.message },
             { status: 400 }
           );
         }
@@ -142,8 +143,8 @@ export async function POST(req: Request) {
         .eq("org_id", orgId);
 
       if (updateErr) {
-        return new Response(
-          JSON.stringify({ error: updateErr.message }),
+        return NextResponse.json(
+          { error: updateErr.message },
           { status: 400 }
         );
       }
@@ -153,7 +154,7 @@ export async function POST(req: Request) {
       // -------------------------------------------------------------------
 
       try {
-        await supabase.from("service_requests").insert({
+        await supabase.from("service_request_events").insert({
           request_id: requestId,
           stage: "awarded",
           note: "Awarded via API",
@@ -168,24 +169,26 @@ export async function POST(req: Request) {
       // 6) Audit log
       // -------------------------------------------------------------------
 
-      await logAudit({
-        supabase,
-        org_id: orgId,
-        user_id: user.id,
-        action: "contract_awarded",
-        entity_type: "contract",
-        entity_id: contractId,
-        metadata: {
-          source_request_id: requestId,
-          tracking_id: request.tracking_id,
-        },
-      });
+      try {
+        await logAudit({
+          supabase,
+          org_id: orgId,
+          user_id: user.id,
+          action: "contract_awarded",
+          entity_type: "contract",
+          entity_id: contractId,
+          metadata: {
+            source_request_id: requestId,
+            tracking_id: request.tracking_id,
+          },
+        });
+      } catch {}
 
-      return {
+      return NextResponse.json({
         success: true,
         contract_id: contractId,
         contract_number: contractNumber,
-      };
+      });
     }
   );
 }

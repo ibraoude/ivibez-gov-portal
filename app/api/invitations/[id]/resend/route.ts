@@ -1,5 +1,7 @@
 
 import { NextResponse } from 'next/server';
+import { NextRequest } from "next/server";  
+import { IdRouteContext } from "@/lib/types/route-context";
 import { secureRoute } from '@/lib/security/secure-route';
 import { Resend } from 'resend';
 import { logAudit } from '@/lib/audit/log-audit';
@@ -7,7 +9,7 @@ import { logAudit } from '@/lib/audit/log-audit';
 export const runtime = 'nodejs';
 
 async function extractId(
-  req: Request,
+  req: NextRequest,
   params?: Promise<{ id?: string }>
 ) {
   // Await params if provided
@@ -31,7 +33,7 @@ async function extractId(
   return null;
 }
 
-export async function POST(req: Request,context: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest,context: IdRouteContext) {
   return secureRoute(
     req,
     {

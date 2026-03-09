@@ -1,20 +1,43 @@
+//app/api/invitations/revoke/route.ts
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
+import { NextRequest } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-export async function POST(req: Request) {
+type SecureContext = {
+  supabase: SupabaseClient;
+  user: {
+    id: string;
+  };
+  profile: {
+    role: string | null;
+    org_id: string | null;
+  };
+  body: any;
+  captcha?: {
+    score?: number;
+  };
+};
+
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {
       expectedAction: "invite_revoke",
       minScore: 0.7,
-      requiredRoles: [],        // ❌ remove strict role gating here
-      requireOrg: false,        // ❌ remove strict org gating
+      requiredRoles: [],   // handled manually
+      requireOrg: false,
       logCaptcha: true,
     },
-    async ({ supabase, user, profile, body, captcha }) => {
+    async (ctx: SecureContext) => {
+
+      const { supabase, user, profile, body, captcha } = ctx;
 
       const inviteId = String(body?.inviteId || "").trim();
-      if (!inviteId) throw new Error("Invite ID required");
+
+      if (!inviteId) {
+        throw new Error("Invite ID required");
+      }
 
       /* ===============================
          🔐 CHECK PLATFORM ADMIN
@@ -38,33 +61,38 @@ export async function POST(req: Request) {
         .eq("id", inviteId)
         .single();
 
-      if (fetchErr || !invite)
+      if (fetchErr || !invite) {
         throw new Error("Invitation not found");
+      }
 
       /* ===============================
          🔐 AUTHORIZATION LOGIC
       =============================== */
 
       if (!isSuperAdmin) {
-        // Must belong to org
-        if (!profile.org_id)
+
+        if (!profile.org_id) {
           throw new Error("User not attached to organization");
+        }
 
-        // Must have proper role
-        if (!["owner", "admin", "manager"].includes(profile.role))
+        const userRole = profile.role ?? "";
+
+        if (!["owner", "admin", "manager"].includes(userRole)) {
           throw new Error("Insufficient role privileges");
+        }
 
-        // Must match org
-        if (invite.org_id !== profile.org_id)
+        if (invite.org_id !== profile.org_id) {
           throw new Error("Unauthorized organization access");
+        }
       }
 
       /* ===============================
          🔐 Cannot revoke accepted invite
       =============================== */
 
-      if (invite.accepted_at)
+      if (invite.accepted_at) {
         throw new Error("Cannot revoke accepted invitation");
+      }
 
       /* ===============================
          🗑 DELETE INVITE
@@ -73,9 +101,12 @@ export async function POST(req: Request) {
       const { error: deleteErr } = await supabase
         .from("invitations")
         .delete()
-        .eq("id", inviteId);
+        .eq("id", inviteId)
+        .limit(1);
 
-      if (deleteErr) throw deleteErr;
+      if (deleteErr) {
+        throw deleteErr;
+      }
 
       /* ===============================
          🧾 AUDIT LOG
@@ -92,7 +123,7 @@ export async function POST(req: Request) {
           email: invite.email,
           role: invite.role,
           revoked_by_super_admin: isSuperAdmin,
-          captcha_score: captcha.score,
+          captcha_score: captcha?.score ?? null,
         },
       });
 

@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { IdRouteContext } from "@/lib/types/route-context";
 import { secureRoute } from '@/lib/security/secure-route';
 import { logAudit } from '@/lib/audit/log-audit';
 
 export const runtime = 'nodejs';
 
-function extractId(req: Request, params?: { id?: string }) {
+function extractId(req: NextRequest, params?: { id?: string }) {
   if (params?.id) return params.id;
   try {
     const parts = new URL(req.url).pathname.split('/').filter(Boolean);
@@ -15,8 +17,8 @@ function extractId(req: Request, params?: { id?: string }) {
 }
 
 export async function POST(
-  req: Request,
-  context: { params: Promise<{ id: string }> }
+  req: NextRequest,
+  context: IdRouteContext
 ) {
   const params = await context.params;
 

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyRecaptchaV3 } from "@/lib/security/recaptcha";
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
     ====================================== */
 
     const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
       .from("invitations")
       .select("id, email, role, org_id, expires_at, accepted_at")
       .eq("token", inviteToken)
+      .limit(1)
       .maybeSingle();
 
     

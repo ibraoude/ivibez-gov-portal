@@ -2,12 +2,13 @@
 // app/api/audit/list/route.ts
 
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { secureRoute } from "@/lib/security/secure-route";
 
 export const runtime = "nodejs";
 
 // Core handler shared by GET and POST
-async function handle(req: Request) {
+async function handle(req: NextRequest) {
   return secureRoute(
     req,
     {
@@ -44,7 +45,6 @@ async function handle(req: Request) {
       if (actor) {
         query = query.or(
           `user_id.eq.${actor},metadata->>requester_email.eq.${actor}`,
-          { referencedTable: "audit_logs" }
         );
       }
       if (action) query = query.ilike("action", `%${action}%`);
@@ -69,11 +69,11 @@ async function handle(req: Request) {
 }
 
 // Prefer GET for listing
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   return handle(req);
 }
 
 // Keep POST for backward compatibility (delegates to GET logic)
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return handle(req);
 }

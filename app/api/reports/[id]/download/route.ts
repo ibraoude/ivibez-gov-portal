@@ -1,6 +1,7 @@
 
 // app/api/reports/[id]/download/route.ts
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 
@@ -38,7 +39,7 @@ function toCSV(rows: any[]): string {
 
 export const runtime = "nodejs";
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   return secureRoute(
     req,
     {

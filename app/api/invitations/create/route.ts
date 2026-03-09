@@ -1,25 +1,54 @@
 import { secureRoute } from "@/lib/security/secure-route";
+import { NextRequest } from "next/server";
 import { logAudit } from "@/lib/audit/log-audit";
 import { Resend } from "resend";
 import crypto from "crypto";
 
-export async function POST(req: Request) {
+type SecureContext = {
+  supabase: any;
+  user: {
+    id: string;
+  };
+  profile: {
+    role: string | null;
+    org_id: string | null;
+  };
+  body?: any;
+  captcha?: {
+    score?: number;
+  };
+};
+
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {
       expectedAction: "invite_create",
-      // 👇 Remove strict org + role enforcement here
-      requiredRoles: [],
+      requiredRoles: [], // handled manually below
       requireOrg: false,
       logCaptcha: true,
     },
-    async ({ supabase, user, profile, body, captcha }) => {
+    async ({ supabase, user, profile, body, captcha }: SecureContext) => {
 
-      const email = String(body?.email || "").trim().toLowerCase();
+      /* ===============================
+         0️⃣ PARSE BODY
+      =============================== */
+
+      const email = String(body?.email || "")
+        .trim()
+        .toLowerCase();
+
       const role = String(body?.role || "viewer");
+
       const requestedOrgId = body?.org_id || null;
 
-      if (!email) throw new Error("Email required");
+      if (!email) {
+        throw new Error("Email required");
+      }
+
+      if (!email.includes("@")) {
+        throw new Error("Invalid email address");
+      }
 
       /* ===============================
          🔐 CHECK IF PLATFORM ADMIN
@@ -40,24 +69,29 @@ export async function POST(req: Request) {
       let orgId: string | null = null;
 
       if (isSuperAdmin) {
-        // Super admin can invite to any org (must provide org_id)
-        if (!requestedOrgId)
+        // Super admin can invite to any org
+        if (!requestedOrgId) {
           throw new Error("org_id required for super_admin");
+        }
 
         orgId = requestedOrgId;
       } else {
-        // Regular org role enforcement
-        if (!profile.org_id)
+        const userRole = profile?.role;
+        const orgIdFromProfile = profile?.org_id;
+
+        if (!orgIdFromProfile) {
           throw new Error("User not attached to organization");
+        }
 
-        if (!["owner", "admin", "manager"].includes(profile.role))
+        if (!["owner", "admin", "manager"].includes(String(userRole))) {
           throw new Error("Insufficient role privileges");
+        }
 
-        orgId = profile.org_id;
+        orgId = orgIdFromProfile;
       }
 
       /* ===============================
-         1️⃣ INSERT INVITATION RECORD
+         1️⃣ CREATE INVITATION
       =============================== */
 
       const token = crypto.randomBytes(32).toString("hex");
@@ -74,15 +108,17 @@ export async function POST(req: Request) {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       /* ===============================
          2️⃣ SEND EMAIL
       =============================== */
 
       const resend = new Resend(process.env.RESEND_API_KEY!);
+
       const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/invite/accept?token=${token}`;
-      
 
       try {
         await resend.emails.send({
@@ -106,9 +142,8 @@ export async function POST(req: Request) {
           `,
         });
       } catch (emailError) {
-        console.error("Email failed:", emailError);
+        console.error("Invite email failed:", emailError);
       }
-      
 
       /* ===============================
          3️⃣ AUDIT LOG
@@ -125,11 +160,18 @@ export async function POST(req: Request) {
           email,
           role,
           created_by_super_admin: isSuperAdmin,
-          captcha_score: captcha.score,
+          captcha_score: captcha?.score ?? null,
         },
       });
 
-      return { success: true };
+      /* ===============================
+         4️⃣ RESPONSE
+      =============================== */
+
+      return {
+        success: true,
+        invitation_id: invite.id,
+      };
     }
   );
 }

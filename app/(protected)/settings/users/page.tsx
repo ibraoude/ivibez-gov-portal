@@ -1,36 +1,18 @@
-
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 import { User as UserIcon, Shield, CheckCircle2, AlertTriangle, Search } from 'lucide-react';
+import type { Database } from '@/types/database';
+import { createClient } from '@/lib/supabase/client';
 
-/* ==================== Types (EXACTLY your table) ==================== */
+const supabase = createClient();
 
-type Profile = {
-  id: string;                    // uuid
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  role: string | null;
-  company: string | null;
-  created_at: string | null;     // timestamptz
-  address_line1: string | null;
-  address_line2: string | null;
-  city: string | null;
-  state: string | null;
-  postal_code: string | null;
-  country: string | null;
-  country_code: string | null;
-  state_region: string | null;
-  email: string | null;
-  org_id: string;                // uuid
-  updated_at: string | null;     // timestamptz
-};
+/* ==================== Types ==================== */
 
-// For the list/table; still a subset is fine for lightweight table reads.
-// (We’ll still fetch full profile on selection to keep it fresh)
+type Profile = Database['public']['Tables']['profiles']['Row'];
+type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
+
 type OrgUserLite = Pick<
   Profile,
   'id' | 'first_name' | 'last_name' | 'email' | 'role' | 'org_id'
@@ -38,83 +20,83 @@ type OrgUserLite = Pick<
 
 type PasswordForm = { password: string; confirm: string };
 
+/* ==================== Empty profile ==================== */
+
+const emptyProfile: Profile = {
+  id: '',
+  first_name: null,
+  last_name: null,
+  phone: null,
+  role: null,
+  company: null,
+  created_at: null,
+  address_line1: null,
+  address_line2: null,
+  city: null,
+  state: null,
+  postal_code: null,
+  country: null,
+  country_code: null,
+  email: null,
+  org_id: null,
+  updated_at: null,
+  full_name: null,
+};
+
 /* ==================== Page ==================== */
 
 export default function UsersDirectoryPage() {
-  // Auth & current user context
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(null);
 
-  // Users list (admin: all in org; non-admin: just self)
   const [usersInOrg, setUsersInOrg] = useState<OrgUserLite[]>([]);
   const [search, setSearch] = useState('');
 
-  // Selection
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
-  // Data for the details panel (full profile)
-  const [profile, setProfile] = useState<Profile>({
-    id: '',
-    first_name: null,
-    last_name: null,
-    phone: null,
-    role: null,
-    company: null,
-    created_at: null,
-    address_line1: null,
-    address_line2: null,
-    city: null,
-    state: null,
-    postal_code: null,
-    country: null,
-    country_code: null,
-    state_region: null,
-    email: null,
-    org_id: '' as string,
-    updated_at: null,
-  });
+  const [profile, setProfile] = useState<Profile>(emptyProfile);
 
-  // UI
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pwdSaving, setPwdSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [password, setPassword] = useState<PasswordForm>({ password: '', confirm: '' });
 
-  // Derived permissions
-  const canActAsAdmin = useMemo(
-    () => ['admin', 'super_admin'].includes((currentUserProfile?.role ?? '').toString()),
-    [currentUserProfile?.role]
-  );
-  const isViewingAnotherUser = useMemo(
-    () => !!currentUserId && !!selectedUserId && currentUserId !== selectedUserId,
-    [currentUserId, selectedUserId]
-  );
-  // Protected fields (role, email, company): editable ONLY when admin/super_admin edits someone else
+  const role = currentUserProfile?.role ?? '';
+  const canActAsAdmin = role === 'admin' || role === 'super_admin';
+
+  const isViewingAnotherUser =
+  !!currentUserId && !!selectedUserId && currentUserId !== selectedUserId;
+
   const lockProtected = !(canActAsAdmin && isViewingAnotherUser);
 
-  /* ---------- Boot: load current user + profile; then load table ---------- */
+  /* ---------- Boot ---------- */
   useEffect(() => {
     async function boot() {
       setLoading(true);
       setMessage(null);
 
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      const user = authData?.user;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
 
-      if (authErr || !user) {
-        setMessage({ type: 'error', text: 'You must be signed in.' });
+      if (!session) {
         setLoading(false);
         return;
       }
 
+      const user = session.user;
+
       setCurrentUserId(user.id);
 
-      const { data: me, error: meErr } = await supabase
+      const { data, error: meErr } = await supabase
         .from('profiles')
-        .select('*')
+        .select(
+          'id, first_name, last_name, phone, role, company, created_at, address_line1, address_line2, city, state, postal_code, country, country_code, email, org_id, updated_at, full_name'
+        )
         .eq('id', user.id)
         .maybeSingle();
+
+      const me = data as Profile | null;
 
       if (meErr) {
         setMessage({ type: 'error', text: meErr.message });
@@ -130,22 +112,39 @@ export default function UsersDirectoryPage() {
 
       setCurrentUserProfile(me);
 
-      // Load table rows
-      if (['admin', 'super_admin'].includes(me.role ?? '')) {
-        const { data: orgUsers, error: orgErr } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, email, role, org_id')
-          .eq('org_id', me.org_id)
-          .order('first_name', { ascending: true });
+      if (!me.org_id) {
+        setUsersInOrg([
+          {
+            id: me.id,
+            first_name: me.first_name,
+            last_name: me.last_name,
+            email: me.email,
+            role: me.role,
+            org_id: me.org_id,
+          },
+        ]);
+        setSelectedUserId(user.id);
+        setLoading(false);
+        return;
+      }
+
+      if (['admin', 'super_admin'].includes((me.role ?? '') as string)) {
+        const { data, error: orgErr } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, role, org_id')
+        .eq('org_id', me.org_id)
+        .order('first_name', { ascending: true });
+
+      const orgUsers = data as OrgUserLite[] | null;
 
         if (orgErr) {
           setMessage({ type: 'error', text: orgErr.message });
         }
+
         if (orgUsers) {
           setUsersInOrg(orgUsers);
         }
       } else {
-        // Non-admin: table only shows yourself
         setUsersInOrg([
           {
             id: me.id,
@@ -158,43 +157,47 @@ export default function UsersDirectoryPage() {
         ]);
       }
 
-      // Preselect yourself on first load
       setSelectedUserId(user.id);
-
       setLoading(false);
     }
 
     boot();
   }, []);
 
-  /* ---------- Load selected user full profile whenever selection changes ---------- */
+  /* ---------- Load selected user ---------- */
   useEffect(() => {
     async function loadSelected() {
       if (!selectedUserId) return;
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select(
+          'id, first_name, last_name, phone, role, company, created_at, address_line1, address_line2, city, state, postal_code, country, country_code, email, org_id, updated_at, full_name'
+        )
         .eq('id', selectedUserId)
         .maybeSingle();
+
+      const profileRow = data as Profile | null;
 
       if (error) {
         setMessage({ type: 'error', text: error.message });
         return;
       }
-      if (data) setProfile(data);
+
+      if (profileRow) setProfile(profileRow);
     }
+
     loadSelected();
   }, [selectedUserId]);
 
-  /* ---------- Save Profile (ONLY table columns; protected gated) ---------- */
+  /* ---------- Save Profile ---------- */
   async function saveProfile() {
     if (!currentUserId || !selectedUserId) return;
 
     setSaving(true);
     setMessage(null);
 
-    const payload: Partial<Profile> = {
+    const payload: ProfileUpdate = {
       first_name: profile.first_name,
       last_name: profile.last_name,
       phone: profile.phone,
@@ -205,11 +208,9 @@ export default function UsersDirectoryPage() {
       postal_code: profile.postal_code,
       country: profile.country,
       country_code: profile.country_code,
-      state_region: profile.state_region,
       updated_at: new Date().toISOString(),
     };
 
-    // Only admins editing someone else can update role/email/company
     if (!lockProtected) {
       payload.role = profile.role;
       payload.email = profile.email;
@@ -226,12 +227,10 @@ export default function UsersDirectoryPage() {
 
     setMessage({ type: 'success', text: 'Profile updated successfully.' });
 
-    // Update current user's in-memory profile if applicable
     if (selectedUserId === currentUserId) {
-      setCurrentUserProfile((prev) => (prev ? ({ ...prev, ...payload } as Profile) : prev));
+      setCurrentUserProfile((prev) => (prev ? { ...prev, ...payload } : prev));
     }
 
-    // Also reflect changed values in the table’s row for consistency (name/email/role)
     setUsersInOrg((rows) =>
       rows.map((u) =>
         u.id === selectedUserId
@@ -239,15 +238,15 @@ export default function UsersDirectoryPage() {
               ...u,
               first_name: payload.first_name ?? u.first_name,
               last_name: payload.last_name ?? u.last_name,
-              email: (payload.email as string) ?? u.email,
-              role: (payload.role as string) ?? u.role,
+              email: payload.email ?? u.email,
+              role: payload.role ?? u.role,
             }
           : u
       )
     );
   }
 
-  /* ---------- Password (self only) ---------- */
+  /* ---------- Password ---------- */
   async function handlePasswordChange() {
     if (isViewingAnotherUser) {
       setMessage({
@@ -256,10 +255,12 @@ export default function UsersDirectoryPage() {
       });
       return;
     }
+
     if (password.password.length < 8) {
       setMessage({ type: 'error', text: 'Password must be at least 8 characters.' });
       return;
     }
+
     if (password.password !== password.confirm) {
       setMessage({ type: 'error', text: 'Passwords do not match.' });
       return;
@@ -273,23 +274,24 @@ export default function UsersDirectoryPage() {
       setMessage({ type: 'error', text: error.message || 'Could not update password.' });
       return;
     }
+
     setPassword({ password: '', confirm: '' });
     setMessage({ type: 'success', text: 'Password updated successfully.' });
   }
 
-  /* ---------- Derived: filtered rows ---------- */
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return usersInOrg;
-    return usersInOrg.filter((u) => {
-      const name = `${u.first_name ?? ''} ${u.last_name ?? ''}`.toLowerCase();
-      return (
-        name.includes(q) ||
-        (u.email ?? '').toLowerCase().includes(q) ||
-        (u.role ?? '').toLowerCase().includes(q)
-      );
-    });
-  }, [usersInOrg, search]);
+  /* ---------- Filtered rows ---------- */
+  const q = search.trim().toLowerCase();
+
+  const filteredRows = !q
+    ? usersInOrg
+    : usersInOrg.filter((u) => {
+        const name = `${u.first_name ?? ''} ${u.last_name ?? ''}`.toLowerCase();
+        return (
+          name.includes(q) ||
+          (u.email ?? '').toLowerCase().includes(q) ||
+          (u.role ?? '').toLowerCase().includes(q)
+        );
+      });
 
   if (loading) return <div className="p-10 text-gray-500">Loading users…</div>;
 
@@ -310,7 +312,6 @@ export default function UsersDirectoryPage() {
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Users</h1>
@@ -320,7 +321,6 @@ export default function UsersDirectoryPage() {
         </div>
       </div>
 
-      {/* GLOBAL MESSAGE */}
       {message && (
         <div
           className={`flex items-start gap-3 rounded-xl border p-4 text-sm ${
@@ -338,9 +338,7 @@ export default function UsersDirectoryPage() {
         </div>
       )}
 
-      {/* LAYOUT: TABLE (left) + DETAILS (right) */}
       <div className="grid gap-6 lg:grid-cols-12">
-        {/* LEFT: Users table */}
         <section className="lg:col-span-5 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-semibold">Users</div>
@@ -368,6 +366,7 @@ export default function UsersDirectoryPage() {
                 {filteredRows.map((u) => {
                   const isActive = u.id === selectedUserId;
                   const fullName = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || '—';
+
                   return (
                     <tr
                       key={u.id}
@@ -392,6 +391,7 @@ export default function UsersDirectoryPage() {
                     </tr>
                   );
                 })}
+
                 {filteredRows.length === 0 && (
                   <tr>
                     <td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-500">
@@ -410,7 +410,6 @@ export default function UsersDirectoryPage() {
           )}
         </section>
 
-        {/* RIGHT: Details / edit */}
         <section className="lg:col-span-7 space-y-6">
           <SectionCard
             icon={<UserIcon className="h-5 w-5" />}
@@ -439,10 +438,9 @@ export default function UsersDirectoryPage() {
           >
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="First name" value={profile.first_name ?? ''} onChange={(v) => setProfile({ ...profile, first_name: v })} />
-              <Field label="Last name"  value={profile.last_name  ?? ''} onChange={(v) => setProfile({ ...profile, last_name: v  })} />
-              <Field label="Phone"       value={profile.phone       ?? ''} onChange={(v) => setProfile({ ...profile, phone: v       })} placeholder="+1 (555) 123‑4567" />
+              <Field label="Last name" value={profile.last_name ?? ''} onChange={(v) => setProfile({ ...profile, last_name: v })} />
+              <Field label="Phone" value={profile.phone ?? ''} onChange={(v) => setProfile({ ...profile, phone: v })} placeholder="+1 (555) 123-4567" />
 
-              {/* Protected (gated) */}
               <Field
                 label="Role"
                 value={profile.role ?? ''}
@@ -462,22 +460,20 @@ export default function UsersDirectoryPage() {
                 onChange={!lockProtected ? (v) => setProfile({ ...profile, email: v }) : undefined}
               />
 
-              {/* Address (all non-protected) */}
               <Field label="Address line 1" value={profile.address_line1 ?? ''} onChange={(v) => setProfile({ ...profile, address_line1: v })} />
               <Field label="Address line 2" value={profile.address_line2 ?? ''} onChange={(v) => setProfile({ ...profile, address_line2: v })} />
-              <Field label="City"          value={profile.city          ?? ''} onChange={(v) => setProfile({ ...profile, city: v })} />
+              <Field label="City" value={profile.city ?? ''} onChange={(v) => setProfile({ ...profile, city: v })} />
               <Field label="State / Province" value={profile.state ?? ''} onChange={(v) => setProfile({ ...profile, state: v })} />
-              <Field label="Postal code"      value={profile.postal_code ?? ''} onChange={(v) => setProfile({ ...profile, postal_code: v })} />
-              <Field label="Country"          value={profile.country ?? ''} onChange={(v) => setProfile({ ...profile, country: v })} />
-              <Field label="Country code"     value={profile.country_code ?? ''} onChange={(v) => setProfile({ ...profile, country_code: v })} />
-              <Field label="State region"     value={profile.state_region ?? ''} onChange={(v) => setProfile({ ...profile, state_region: v })} />
+              <Field label="Postal code" value={profile.postal_code ?? ''} onChange={(v) => setProfile({ ...profile, postal_code: v })} />
+              <Field label="Country" value={profile.country ?? ''} onChange={(v) => setProfile({ ...profile, country: v })} />
+              <Field label="Country code" value={profile.country_code ?? ''} onChange={(v) => setProfile({ ...profile, country_code: v })} />
             </div>
           </SectionCard>
 
           <SectionCard
             icon={<Shield className="h-5 w-5" />}
             title="Security"
-            description={isViewingAnotherUser ? 'Password changes are self‑service only.' : 'Change your password.'}
+            description={isViewingAnotherUser ? 'Password changes are self-service only.' : 'Change your password.'}
           >
             <div className="grid gap-4 md:grid-cols-3">
               <PasswordField
@@ -556,7 +552,7 @@ function Field({
       <input
         type="text"
         value={value}
-        onChange={(e) => onChange?.(e.target.value)}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         placeholder={placeholder}
         readOnly={readOnly}
         className={`w-full rounded-lg border px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-200 ${
@@ -579,6 +575,7 @@ function PasswordField({
   placeholder?: string;
 }) {
   const [visible, setVisible] = useState(false);
+
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
@@ -602,4 +599,3 @@ function PasswordField({
     </label>
   );
 }
-``

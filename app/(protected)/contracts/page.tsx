@@ -1,8 +1,10 @@
+
+// app/(protected)/contracts/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 type ContractRow = {
   id: string;
@@ -41,11 +43,15 @@ function money(n: number | null) {
   }
 }
 
+const supabase = createClient();
+
 export default function ContractsPage() {
+  const router = useRouter();
+
+  // ✅ Hooks at top level (unconditional)
   const [loading, setLoading] = useState(true);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter()
 
   // UI state
   const [q, setQ] = useState("");
@@ -56,7 +62,7 @@ export default function ContractsPage() {
   const [editing, setEditing] = useState<ContractRow | null>(null);
   const [form, setForm] = useState({
     contract_number: "",
-    source_type: "service_request", // or "manual"
+    source_type: "service_request", // or "manual" / "award"
     gov_type: "",
     title: "",
     description: "",
@@ -73,7 +79,6 @@ export default function ContractsPage() {
 
   useEffect(() => {
     loadContracts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadContracts() {
@@ -84,7 +89,8 @@ export default function ContractsPage() {
       .from("contracts")
       .select(
         "id,contract_number,tracking_id,source_request_id,source_type,gov_type,title,description,status,progress_percentage,final_amount,period_of_performance,period_start,created_at,updated_at"
-      );
+      )
+      .returns<ContractRow[]>(); // strong typing of data
 
     if (error) {
       setError(error.message);
@@ -93,16 +99,16 @@ export default function ContractsPage() {
       return;
     }
 
-    setContracts((data as ContractRow[]) || []);
+    setContracts(data ?? []);
     setLoading(false);
   }
 
-  const filtered = useMemo(() => {
+  const filtered: ContractRow[] = (() => {
     const needle = q.trim().toLowerCase();
     let rows = contracts;
 
     if (needle) {
-      rows = rows.filter((c) => {
+      rows = rows.filter((c: ContractRow) => {
         return (
           (c.contract_number || "").toLowerCase().includes(needle) ||
           (c.tracking_id || "").toLowerCase().includes(needle) ||
@@ -113,24 +119,24 @@ export default function ContractsPage() {
       });
     }
 
-    rows = [...rows].sort((a, b) => {
+    rows = [...rows].sort((a: ContractRow, b: ContractRow) => {
       const dir = sortDir === "asc" ? 1 : -1;
 
-      const av = (a as any)[sortKey];
-      const bv = (b as any)[sortKey];
+      const av = a[sortKey] as unknown;
+      const bv = b[sortKey] as unknown;
 
       // dates
       if (sortKey === "created_at") {
-        const ad = av ? new Date(av).getTime() : 0;
-        const bd = bv ? new Date(bv).getTime() : 0;
+        const ad = typeof av === "string" ? new Date(av).getTime() : 0;
+        const bd = typeof bv === "string" ? new Date(bv).getTime() : 0;
         return (ad - bd) * dir;
       }
 
-      return String(av ?? "").localeCompare(String(bv ?? "")) * dir;
+      return String((av as string) ?? "").localeCompare(String((bv as string) ?? "")) * dir;
     });
 
     return rows;
-  }, [contracts, q, sortKey, sortDir]);
+  })();
 
   function resetForm() {
     setEditing(null);
@@ -181,15 +187,16 @@ export default function ContractsPage() {
       title: form.title.trim() || null,
       description: form.description.trim() || null,
       status: form.status.trim() || null,
-      progress_percentage: Number.isFinite(Number(form.progress_percentage)) ? Number(form.progress_percentage) : 0,
+      progress_percentage: Number.isFinite(form.progress_percentage)
+        ? Number(form.progress_percentage)
+        : 0,
       final_amount: form.final_amount.trim() ? Number(form.final_amount) : null,
       period_of_performance: form.period_of_performance.trim() || null,
       period_start: form.period_start.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
-    // Optional: upload file first (if you want to store a link somewhere, you need a column for it)
-    // This upload will still work, but it won't be referenced unless you add a column like file_path.
+    // Optional: upload file first (if you want to store a link, add a file_path column)
     if (file) {
       await uploadContractFile(file, editing?.id || form.contract_number.trim());
     }
@@ -201,8 +208,7 @@ export default function ContractsPage() {
         return;
       }
     } else {
-      // tracking_id defaults? In your schema tracking_id is NOT NULL.
-      // If you don't have a trigger generating it, you MUST generate here:
+      // If your DB doesn't auto-generate tracking_id, create one here
       const tracking_id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
 
       const { error } = await supabase.from("contracts").insert({
@@ -252,14 +258,14 @@ export default function ContractsPage() {
     }
   }
 
-    // ===== KPIs =====
+  // ===== KPIs =====
   const totalContracts = contracts.length;
-  const activeContracts = contracts.filter((c) => (c.status ?? '') === 'active').length;
-  const completedContracts = contracts.filter((c) => (c.status ?? '') === 'completed').length;
-  const atRiskContracts = contracts.filter((c) => (c.status ?? '') === 'at_risk').length;
-  const portfolioValue = contracts.reduce((sum, c) => sum + (c.final_amount ?? 0), 0);
+  const activeContracts = contracts.filter((c) => (c.status || "").toLowerCase() === "active").length;
+  const completedContracts = contracts.filter((c) => (c.status || "").toLowerCase() === "completed").length;
+  const atRiskContracts = contracts.filter((c) => (c.status || "").toLowerCase() === "at_risk").length;
+  const portfolioValue = contracts.reduce((sum, c) => sum + (c.final_amount || 0), 0);
   const activeExposure = contracts
-    .filter((c) => (c.status ?? '') === 'active')
+    .filter((c) => (c.status ?? "") === "active")
     .reduce((sum, c) => sum + (c.final_amount ?? 0), 0);
 
   return (
@@ -271,7 +277,7 @@ export default function ContractsPage() {
         </div>
 
         <button
-          onClick={() => router.push("/contracts/new")}
+          onClick={() => router.replace("/contracts/new")}
           className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
         >
           + New Contract
@@ -287,7 +293,6 @@ export default function ContractsPage() {
         <KPI title="Active Exposure" value={`$${activeExposure.toLocaleString()}`} />
       </div>
 
-
       {/* Controls */}
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <input
@@ -300,7 +305,7 @@ export default function ContractsPage() {
         <div className="flex gap-2">
           <select
             value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as any)}
+            onChange={(e) => setSortKey(e.target.value as typeof sortKey)}
             className="rounded-lg border px-3 py-2 text-sm"
           >
             <option value="created_at">Sort: Created</option>
@@ -310,7 +315,7 @@ export default function ContractsPage() {
 
           <select
             value={sortDir}
-            onChange={(e) => setSortDir(e.target.value as any)}
+            onChange={(e) => setSortDir(e.target.value as typeof sortDir)}
             className="rounded-lg border px-3 py-2 text-sm"
           >
             <option value="desc">Desc</option>
@@ -561,7 +566,7 @@ export default function ContractsPage() {
 }
 
 /* ================= Components ================= */
-function KPI({ title, value }: { title: string; value: any }) {
+function KPI({ title, value }: { title: string; value: number | string | React.ReactNode }) {
   return (
     <div className="rounded-xl bg-white p-4 shadow">
       <div className="text-xs text-gray-500">{title}</div>
@@ -569,3 +574,4 @@ function KPI({ title, value }: { title: string; value: any }) {
     </div>
   );
 }
+``

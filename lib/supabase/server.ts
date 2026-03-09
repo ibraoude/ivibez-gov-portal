@@ -1,9 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/database";
 
 export function supabaseService() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!, // MUST be server-only
-    { auth: { persistSession: false } }
+  return createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        persistSession: false,
+      },
+    }
   );
 }

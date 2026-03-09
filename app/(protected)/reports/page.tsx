@@ -1,10 +1,12 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
+
+const supabase = createClient();
 import {
   FileText,
   CheckCircle2,
@@ -61,7 +63,7 @@ export default function ReportsPage() {
       try {
         const { data: authData } = await supabase.auth.getUser();
         if (!authData?.user) {
-          router.push('/login');
+          router.replace('/login');
           return;
         }
 
@@ -101,10 +103,10 @@ export default function ReportsPage() {
   }
 
   /* ===================== FETCH REPORTS ===================== */
-  async function fetchReports(resetPage = false) {
+  async function fetchReports(resetPage = false, newPage?: number) {
     setLoadingList(true);
     try {
-      const currentPage = resetPage ? 1 : page;
+      const currentPage = resetPage ? 1 : newPage ?? page;
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
 
@@ -121,9 +123,7 @@ export default function ReportsPage() {
       if (endDate) query = query.lte('created_at', endOfDayISO(endDate));
       if (q.trim()) {
         const term = escapeLike(q.trim());
-        query = query.or(`id.ilike.%${term}%,report_type.ilike.%${term}%`, {
-          referencedTable: 'reports',
-        });
+        query = query.or(`id.ilike.%${term}%,report_type.ilike.%${term}%`);
       }
 
       // order + range
@@ -176,7 +176,7 @@ export default function ReportsPage() {
     try {
       const { data: session } = await supabase.auth.getSession();
       const token = session.session?.access_token;
-      if (!token) { router.push('/login'); return; }
+      if (!token) { router.replace('/login'); return; }
 
       const res = await fetch('/api/compliance-report', {
         method: 'POST',
@@ -193,7 +193,7 @@ export default function ReportsPage() {
         throw new Error(msg);
       }
 
-      await fetchReports(true);
+      await fetchReports(true, 1);
     } catch (e: any) {
       alert(e.message || 'Error generating report');
     } finally {
@@ -208,7 +208,7 @@ export default function ReportsPage() {
     try {
       const { data: session } = await supabase.auth.getSession();
       const token = session.session?.access_token;
-      if (!token) { router.push('/login'); return; }
+      if (!token) { router.replace('/login'); return; }
 
       const res = await fetch(`/api/reports/${id}/approve`, {
         method: 'POST',
@@ -292,7 +292,7 @@ export default function ReportsPage() {
 
   /* ===================== DERIVED ===================== */
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const canGenerate = role === 'admin' || role === 'manager';
   const canApprove = role === 'admin' || role === 'manager';
 
@@ -433,21 +433,23 @@ export default function ReportsPage() {
                 <button
                   disabled={page <= 1 || loadingList}
                   onClick={() => {
-                    setPage((p) => Math.max(1, p - 1));
-                    fetchReports(false);
+                    const next = Math.max(1, page - 1);
+                    setPage(next);
+                    fetchReports(false, next);
                   }}
                   className="rounded-lg border px-2 py-1 text-xs disabled:opacity-50"
                 >
                   Prev
                 </button>
                 <span className="px-2 text-xs text-gray-600">
-                  {page} / {Math.max(1, Math.ceil(total / pageSize))}
+                  {page} / {totalPages}
                 </span>
                 <button
-                  disabled={page >= Math.max(1, Math.ceil(total / pageSize)) || loadingList}
+                  disabled={page >= totalPages || loadingList}
                   onClick={() => {
-                    setPage((p) => Math.min(Math.max(1, Math.ceil(total / pageSize)), p + 1));
-                    fetchReports(false);
+                    const next = Math.min(totalPages, page + 1);
+                    setPage(next);
+                    fetchReports(false, next);
                   }}
                   className="rounded-lg border px-2 py-1 text-xs disabled:opacity-50"
                 >

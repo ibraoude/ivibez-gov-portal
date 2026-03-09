@@ -1,7 +1,8 @@
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
+import { NextRequest } from "next/server";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return secureRoute(
     req,
     {
@@ -11,33 +12,41 @@ export async function POST(req: Request) {
     },
     async ({ user, profile, supabase, body, captcha }) => {
 
-      // 🔎 Ensure user belongs to org
-      if (!profile.org_id) {
+      /* ===============================
+         ORG VALIDATION
+      =============================== */
+
+      if (!profile?.org_id) {
         throw new Error("User not assigned to organization");
       }
 
-      const {
-        govType,
-        title,
-        description,
-        formData,
-      } = body;
+      /* ===============================
+         BODY SAFE PARSING
+      =============================== */
+
+      const govType = String(body?.govType || "").trim();
+      const title = String(body?.title || "").trim();
+      const description = body?.description ?? null;
+      const formData = body?.formData ?? null;
 
       if (!govType || !title) {
         throw new Error("Missing required fields");
       }
 
-      // 🔐 Server-controlled insert (NOT client controlled)
+      /* ===============================
+         INSERT SERVICE REQUEST
+      =============================== */
+
       const { data: request, error } = await supabase
         .from("service_requests")
         .insert({
           org_id: profile.org_id,
           submitted_by: user.id,
-          requester_email: user.email,
+          requester_email: user.email ?? null,
           gov_type: govType,
           title,
-          description: description ?? null,
-          form_data: formData ?? null,
+          description,
+          form_data: formData,
           status: "pending",
           admin_status: "submitted",
           awarded: false,
@@ -46,11 +55,14 @@ export async function POST(req: Request) {
         .select()
         .single();
 
-      if (error) {
-        throw new Error(error.message);
+      if (error || !request) {
+        throw new Error(error?.message || "Failed to create service request");
       }
 
-      // 🧾 Audit Log
+      /* ===============================
+         AUDIT LOG
+      =============================== */
+
       await logAudit({
         supabase,
         org_id: profile.org_id,
@@ -60,7 +72,7 @@ export async function POST(req: Request) {
         entity_id: request.id,
         metadata: {
           gov_type: govType,
-          captcha_score: captcha.score,
+          captcha_score: captcha?.score ?? null,
         },
       });
 

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();

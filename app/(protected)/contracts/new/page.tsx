@@ -47,7 +47,7 @@ export default function NewContractPage() {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
       if (!accessToken) {
-        router.push("/login");
+        router.replace("/login");
         return;
       }
 
@@ -77,7 +77,7 @@ export default function NewContractPage() {
         return;
       }
 
-      router.push(`/admin/contracts/${json.contract_id}`);
+      router.replace(`/admin/contracts/${json.contract_id}`);
     } catch (err) {
       console.error(err);
       alert("Unexpected error");

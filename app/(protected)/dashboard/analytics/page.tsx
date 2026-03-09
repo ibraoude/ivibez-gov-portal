@@ -1,8 +1,10 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
+
+const supabase = createClient();
 import {
   ResponsiveContainer,
   LineChart,
@@ -77,8 +79,9 @@ export default function AnalyticsPage() {
     setLoadError(null);
 
     const { data, error } = await supabase
-      .from('contracts')
-      .select('*'); // keep as-is per your schema
+    .from('contracts')
+    .select('id,title,status,gov_type,final_amount,created_at,updated_at')
+    .returns<Contract[]>();
 
     if (error) {
       console.error(error);
@@ -92,81 +95,93 @@ export default function AnalyticsPage() {
   }
 
   /** Apply client-side filters (status + gov_type). */
-  const visibleContracts = useMemo(() => {
-    return contracts.filter((c) => {
-      const okStatus = statusFilter === 'all' ? true : c.status === statusFilter;
-      const okGov = govTypeFilter === 'all' ? true : c.gov_type === govTypeFilter;
-      return okStatus && okGov;
-    });
-  }, [contracts, statusFilter, govTypeFilter]);
+  const visibleContracts = contracts.filter((c) => {
+    const okStatus = statusFilter === 'all' ? true : c.status === statusFilter;
+    const okGov = govTypeFilter === 'all' ? true : c.gov_type === govTypeFilter;
+    return okStatus && okGov;
+  });
 
   /* =========================
      KPI CALCULATIONS (memo)
      ========================= */
-  const { totalContracts, activeContracts, totalValue, completionRate } = useMemo(() => {
-    const total = visibleContracts.length;
-    const active = visibleContracts.filter((c) => c.status === 'active').length;
-    const value = visibleContracts.reduce((sum, c) => sum + (c.final_amount || 0), 0);
-    const completion =
-      total > 0
-        ? Math.round((visibleContracts.filter((c) => c.status === 'completed').length / total) * 100)
-        : 0;
+  const totalContracts = visibleContracts.length;
 
-    return {
-      totalContracts: total,
-      activeContracts: active,
-      totalValue: value,
-      completionRate: completion,
-    };
-  }, [visibleContracts]);
+  const activeContracts = visibleContracts.filter(
+    (c) => (c.status || '').toLowerCase() === 'active'
+  ).length;
+
+  const totalValue = visibleContracts.reduce(
+    (sum, c) => sum + (c.final_amount || 0),
+    0
+  );
+
+  const completionRate =
+    totalContracts > 0
+      ? Math.round(
+          (visibleContracts.filter((c) => (c.status || '').toLowerCase() === 'completed').length /
+            totalContracts) *
+            100
+        )
+      : 0;
 
   /* =========================
      STATUS DISTRIBUTION (memo)
      ========================= */
-  const statusData = useMemo(() => {
-    const map = new Map<string, number>();
+  const statusMap = new Map<string, number>();
     for (const c of visibleContracts) {
-      map.set(c.status, (map.get(c.status) ?? 0) + 1);
+      const key = c.status || 'unknown';
+      statusMap.set(key, (statusMap.get(key) ?? 0) + 1);
     }
-    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
-  }, [visibleContracts]);
+
+    const statusData = Array.from(statusMap.entries()).map(([name, value]) => ({
+      name,
+      value,
+    }));
 
   /* =========================
      GOV TYPE BREAKDOWN (memo)
      ========================= */
-  const govData = useMemo(() => {
-    const map = new Map<string, number>();
+  const govMap = new Map<string, number>();
+
     for (const c of visibleContracts) {
-      map.set(c.gov_type, (map.get(c.gov_type) ?? 0) + (c.final_amount || 0));
-    }
-    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
-  }, [visibleContracts]);
+      const key = c.gov_type || 'Unknown';
+      govMap.set(key, (govMap.get(key) ?? 0) + (c.final_amount || 0));
+          }
+
+    const govData = Array.from(govMap.entries()).map(([name, value]) => ({
+      name,
+      value,
+    }));
 
   /* =========================
      REVENUE TREND (Monthly, memo)
      ========================= */
-  const revenueData = useMemo(() => {
-    const map = new Map<string, number>(); // key = "YYYY-MM"
+  const revenueMap = new Map<string, number>();
+
     for (const c of visibleContracts) {
       const k = yearMonthKey(c.created_at);
-      map.set(k, (map.get(k) ?? 0) + (c.final_amount || 0));
+      revenueMap.set(k, (revenueMap.get(k) ?? 0) + (c.final_amount || 0));
     }
-    const sortedKeys = Array.from(map.keys()).sort(); // lexicographic works for YYYY-MM
-    return sortedKeys.map((k) => ({ month: labelFromYearMonthKey(k), revenue: map.get(k)! }));
-  }, [visibleContracts]);
+
+    const revenueData = Array.from(revenueMap.keys())
+      .sort()
+      .map((k) => ({
+        month: labelFromYearMonthKey(k),
+        revenue: revenueMap.get(k)!,
+      }));
 
   /* =========================
      Unique filters (memo)
      ========================= */
-  const distinctStatuses = useMemo(() => {
-    const set = new Set<string>(contracts.map((c) => c.status).filter(Boolean));
-    return ['all', ...Array.from(set)];
-  }, [contracts]);
+  const distinctStatuses = [
+    'all',
+    ...Array.from(new Set(contracts.map((c) => c.status).filter(Boolean))),
+  ];
 
-  const distinctGovTypes = useMemo(() => {
-    const set = new Set<string>(contracts.map((c) => c.gov_type).filter(Boolean));
-    return ['all', ...Array.from(set)];
-  }, [contracts]);
+  const distinctGovTypes = [
+    'all',
+    ...Array.from(new Set(contracts.map((c) => c.gov_type).filter(Boolean))),
+  ];
 
   /* =========================
      Rendering
@@ -293,7 +308,7 @@ export default function AnalyticsPage() {
           <LineChart data={revenueData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
             <CartesianGrid stroke="#eee" />
             <XAxis dataKey="month" />
-            <YAxis tickFormatter={(v) => currency.format(v).replace('$', '$ ')} />
+            <YAxis tickFormatter={(v) => currency.format(v)} />
             <Tooltip formatter={(val: any) => currency.format(val)} />
             <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={3} dot={{ r: 2 }} />
           </LineChart>

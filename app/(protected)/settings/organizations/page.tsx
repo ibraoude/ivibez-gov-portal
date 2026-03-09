@@ -1,10 +1,12 @@
 
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { Database } from "@/types/database";
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
+import { createClient } from '@/lib/supabase/client';
+const supabase = createClient();
 import {
   Building2,
   Image as ImageIcon,
@@ -64,6 +66,8 @@ type ProfileLite = {
   org_id: string;
   role: string | null;
 };
+
+type OrgInsert = Database["public"]["Tables"]["organizations"]["Insert"];
 
 // Global admin membership row
 type AdminUser = { user_id: string };
@@ -140,12 +144,21 @@ export default function OrganizationsDirectoryPage() {
   // Permissions
   // - global admin can edit any org
   // - org admins/super_admins can edit their own org
-  const canEdit = useMemo(() => {
-    if (!profile) return false;
-    if (isGlobalAdmin) return true;
-    const isOrgAdmin = ['admin', 'super_admin'].includes((profile.role ?? '').toString());
-    return isOrgAdmin && !!organization && organization.id === profile.org_id;
-  }, [profile, isGlobalAdmin, organization?.id]);
+  let canEdit = false;
+
+  if (profile) {
+    if (isGlobalAdmin) {
+      canEdit = true;
+    } else {
+      const isOrgAdmin =
+        profile.role === 'admin' || profile.role === 'super_admin';
+
+      canEdit =
+        isOrgAdmin &&
+        !!organization &&
+        organization.id === profile.org_id;
+    }
+  }
 
   /* ==================== Data loading ==================== */
 
@@ -180,8 +193,16 @@ export default function OrganizationsDirectoryPage() {
       setMessage(null);
       try {
         // Auth
-        const { data: authData } = await supabase.auth.getUser();
-        const user = authData?.user;
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData.session;
+
+        if (!session) {
+          setLoading(false);
+          return;
+        }
+
+        const user = session.user;
+
         if (!user) {
           setMessage({ type: 'error', text: 'You must be signed in to view organizations.' });
           setLoading(false);
@@ -190,11 +211,14 @@ export default function OrganizationsDirectoryPage() {
         setCurrentUserId(user.id);
 
         // Global admin check
-        const { data: adminRow } = await supabase
+        const { data } = await supabase
           .from('admin_users')
           .select('user_id')
           .eq('user_id', user.id)
-          .maybeSingle<AdminUser>();
+          .maybeSingle();
+
+        const adminRow = data as AdminUser | null;
+
         setIsGlobalAdmin(!!adminRow);
 
         // Profile (org & role)
@@ -260,15 +284,16 @@ export default function OrganizationsDirectoryPage() {
     let cancelled = false;
 
     (async () => {
-      try {
-        setOptions({ key, v: 'weekly' });
-        const placesLib = await importLibrary('places' as any);
-        const { Autocomplete } = placesLib as any;
+  try {
+    setOptions({ key, v: 'weekly' });
 
-        const read = (type: string, comps: any[], short = false) => {
-          const f = comps.find((c: any) => c.types.includes(type));
-          return f ? (short ? f.short_name : f.long_name) : '';
-        };
+    const placesLib = await importLibrary("places");
+    const { Autocomplete } = placesLib as google.maps.PlacesLibrary;
+
+    const read = (type: string, comps: any[], short = false) => {
+      const f = comps.find((c: any) => c.types.includes(type));
+      return f ? (short ? f.short_name : f.long_name) : '';
+    };
 
         const bind = (
           el: HTMLInputElement,
@@ -343,7 +368,7 @@ export default function OrganizationsDirectoryPage() {
       cleanups.forEach((fn) => fn());
     };
     // Keep deps minimal; .current values allow rebind when inputs mount
-  }, [createAddressRef.current, editAddressRef.current]);
+  }, []);
 
   /* ==================== Actions ==================== */
 
@@ -358,25 +383,26 @@ export default function OrganizationsDirectoryPage() {
     setSaving(true);
     setMessage(null);
 
-    const payload: Partial<Organization> = {
-      name: draft.name,
-      agency_type: draft.agency_type,
-      gov_domain: draft.gov_domain,
-      legal_name: draft.legal_name,
-      email: draft.email,
-      phone: draft.phone,
-      website: draft.website,
-      logo_url: draft.logo_url,
-      address_line1: draft.address_line1,
-      address_line2: draft.address_line2,
-      city: draft.city,
-      state: draft.state,
-      postal_code: draft.postal_code,
-      country: draft.country,
-      allow_self_registration: draft.allow_self_registration ?? false,
-      require_admin_approval: draft.require_admin_approval ?? true,
-      updated_at: new Date().toISOString(),
-    };
+  type OrgUpdate = Database["public"]["Tables"]["organizations"]["Update"];
+
+  const payload: OrgUpdate = {
+    name: draft.name.trim(),
+    legal_name: (draft.legal_name ?? '').trim() || null,
+    email: (draft.email ?? '').trim() || null,
+    phone: (draft.phone ?? '').trim() || null,
+    website: (draft.website ?? '').trim() || null,
+    agency_type: (draft.agency_type ?? '').trim() || null,
+    gov_domain: (draft.gov_domain ?? '').trim() || null,
+    address_line1: (draft.address_line1 ?? '').trim() || null,
+    address_line2: (draft.address_line2 ?? '').trim() || null,
+    city: (draft.city ?? '').trim() || null,
+    state: (draft.state ?? '').trim() || null,
+    postal_code: (draft.postal_code ?? '').trim() || null,
+    country: (draft.country ?? '').trim() || null,
+    allow_self_registration: draft.allow_self_registration ?? false,
+    require_admin_approval: draft.require_admin_approval ?? true,
+    updated_at: new Date().toISOString(),
+  };
 
     const { error } = await supabase.from('organizations').update(payload).eq('id', organization.id);
     setSaving(false);
@@ -408,27 +434,31 @@ export default function OrganizationsDirectoryPage() {
       return;
     }
 
-    const payload: Partial<Organization> = {
-      name: newOrg.name.trim(),
-      legal_name: (newOrg.legal_name ?? '').trim() || null,
-      email: (newOrg.email ?? '').trim() || null,
-      phone: (newOrg.phone ?? '').trim() || null,
-      website: (newOrg.website ?? '').trim() || null,
-      agency_type: (newOrg.agency_type ?? '').trim() || null,
-      gov_domain: (newOrg.gov_domain ?? '').trim() || null,
-      address_line1: (newOrg.address_line1 ?? '').trim() || null,
-      address_line2: (newOrg.address_line2 ?? '').trim() || null,
-      city: (newOrg.city ?? '').trim() || null,
-      state: (newOrg.state ?? '').trim() || null,
-      postal_code: (newOrg.postal_code ?? '').trim() || null,
-      country: (newOrg.country ?? '').trim() || null,
-      allow_self_registration: false,
-      require_admin_approval: true,
-      created_by: currentUserId,
-      updated_at: new Date().toISOString(),
-    };
+    const payload = {
+  name: newOrg.name.trim(),
+  legal_name: (newOrg.legal_name ?? '').trim() || null,
+  email: (newOrg.email ?? '').trim() || null,
+  phone: (newOrg.phone ?? '').trim() || null,
+  website: (newOrg.website ?? '').trim() || null,
+  agency_type: (newOrg.agency_type ?? '').trim() || null,
+  gov_domain: (newOrg.gov_domain ?? '').trim() || null,
+  address_line1: (newOrg.address_line1 ?? '').trim() || null,
+  address_line2: (newOrg.address_line2 ?? '').trim() || null,
+  city: (newOrg.city ?? '').trim() || null,
+  state: (newOrg.state ?? '').trim() || null,
+  postal_code: (newOrg.postal_code ?? '').trim() || null,
+  country: (newOrg.country ?? '').trim() || null,
+  allow_self_registration: false,
+  require_admin_approval: true,
+  created_by: currentUserId,
+} satisfies Database["public"]["Tables"]["organizations"]["Insert"];
 
-    const { data, error } = await supabase.from('organizations').insert(payload).select('*').single();
+    const { data, error } = await supabase
+      .from('organizations')
+      .insert([payload])   // ← must be array
+      .select()
+      .single();
+
     if (error || !data) {
       setMessage({ type: 'error', text: error?.message || 'Failed to create organization.' });
       return;
@@ -506,22 +536,25 @@ export default function OrganizationsDirectoryPage() {
   }
 
   /* ==================== Derived: filtered rows ==================== */
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return orgList;
+ const q = search.trim().toLowerCase();
 
-    return orgList.filter((o) => {
-      const name = (o.name ?? '').toLowerCase();
-      const domain = (o.gov_domain ?? '').toLowerCase();
-      const website = (o.website ?? '').toLowerCase();
-      const city = (o.city ?? '').toLowerCase();
-      const state = (o.state ?? '').toLowerCase();
-      return (
-        name.includes(q) || domain.includes(q) || website.includes(q) || city.includes(q) || state.includes(q)
-      );
+  const filteredRows = !q
+    ? orgList
+    : orgList.filter((o) => {
+        const name = (o.name ?? '').toLowerCase();
+        const domain = (o.gov_domain ?? '').toLowerCase();
+        const website = (o.website ?? '').toLowerCase();
+        const city = (o.city ?? '').toLowerCase();
+        const state = (o.state ?? '').toLowerCase();
+
+        return (
+          name.includes(q) ||
+          domain.includes(q) ||
+          website.includes(q) ||
+          city.includes(q) ||
+          state.includes(q)
+        );
     });
-  }, [orgList, search]);
-
   /* ==================== Render ==================== */
 
   if (loading) return <div className="p-10 text-gray-500">Loading organizations…</div>;
@@ -759,7 +792,7 @@ export default function OrganizationsDirectoryPage() {
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Organization Name" value={draft.name} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, name: v })} />
+                    <Field label="Organization Name" value={draft.name} readOnly={!canEdit} onChange={(v) => setDraft((prev) => prev ? { ...prev, name: v } : prev)} />
                     <Field label="Legal Name" value={draft.legal_name ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, legal_name: v })} />
                     <Field label="Agency Type" value={draft.agency_type ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, agency_type: v })} />
                     <Field label="Gov Domain" value={draft.gov_domain ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, gov_domain: v })} placeholder="e.g., agency.gov" />

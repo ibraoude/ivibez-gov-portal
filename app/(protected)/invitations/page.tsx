@@ -1,9 +1,11 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+
+const supabase = createClient();
 import {
   Loader2,
   Filter,
@@ -16,6 +18,7 @@ import {
 } from 'lucide-react';
 
 type Role = 'owner' | 'admin' | 'manager' | 'auditor' | 'client' | 'member' | 'viewer';
+type AllowedRole = Extract<Role, 'owner' | 'admin' | 'manager' | 'auditor' | 'client' | 'member' | 'viewer'>;
 
 type Invitation = {
   id: string;
@@ -115,17 +118,16 @@ export default function InvitationManagementPage() {
   const [newRole, setNewRole] = useState<AllowedRole>('viewer');
   const [targetOrg, setTargetOrg] = useState<string>(''); // optional for platform admins
 
-  type AllowedRole = Extract<Role, 'owner' | 'admin' | 'manager' | 'auditor' | 'client' | 'member' | 'viewer'>;
-
   useEffect(() => {
-    (async () => {
+    const init = async () => {
       try {
         const { data: authData } = await supabase.auth.getUser();
+
         if (!authData?.user) {
-          router.push('/login');
+          router.replace('/login');
           return;
         }
-        // RLS-safe: lookup own role
+
         const { data: p } = await supabase
           .from('profiles')
           .select('role')
@@ -133,18 +135,19 @@ export default function InvitationManagementPage() {
           .single();
 
         setRole((p?.role ?? 'viewer') as Role);
-        await fetchInvitations(true);
+        await fetchInvitations(true, 1);
       } finally {
         setLoading(false);
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    };
 
-  async function fetchInvitations(reset = false) {
+    void init();
+  }, [router]);
+
+  async function fetchInvitations(reset = false, newPage?: number) {
     setLoadingList(true);
     try {
-      const currentPage = reset ? 1 : page;
+      const currentPage = reset ? 1 : newPage ?? page;
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
 
@@ -172,11 +175,11 @@ export default function InvitationManagementPage() {
 
       // search by email
       if (search.trim()) {
-        const term = search.trim().replace(/[%_]/g, (m) => '\\' + m);
+        const term = search.trim().replace(/[\\%_]/g, '\\$&');
         query = query.ilike('email', `%${term}%`);
       }
 
-      const { data, error, count } = await query;
+      const { data, error, count } = await query.returns<Invitation[]>();
 
       if (error) {
         console.error('invitations fetch error:', error.message);
@@ -186,7 +189,7 @@ export default function InvitationManagementPage() {
         const list = (data ?? []) as Invitation[];
 
         // Map inviter emails
-        const inviterIds = Array.from(new Set(list.map((r) => r.invited_by).filter(Boolean))) as string[];
+        const inviterIds = [...new Set(list.map((r) => r.invited_by).filter(Boolean))] as string[];
         let inviterEmailById: Record<string, string> = {};
         if (inviterIds.length) {
           const { data: profs } = await supabase
@@ -358,7 +361,7 @@ export default function InvitationManagementPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => fetchInvitations(true)}
+              onClick={() => fetchInvitations(true, 1)}
               disabled={loadingList}
               className="inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
             >
@@ -415,7 +418,12 @@ export default function InvitationManagementPage() {
             </select>
             <select
               value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
+              onChange={(e) => {
+                const size = Number(e.target.value);
+                setPageSize(size);
+                setPage(1);
+                void fetchInvitations(true, 1);
+              }}
               className="h-9 rounded-lg border px-3 text-sm"
             >
               {PAGE_SIZE_OPTIONS.map((n) => (
@@ -426,7 +434,7 @@ export default function InvitationManagementPage() {
             </select>
             <div className="flex items-center">
               <button
-                onClick={() => fetchInvitations(true)}
+                onClick={() => fetchInvitations(true, 1)}
                 className="h-9 w-full rounded-lg border px-3 text-sm hover:bg-gray-50"
               >
                 Apply
@@ -525,10 +533,11 @@ export default function InvitationManagementPage() {
             <div className="flex items-center gap-1">
               <button
                 onClick={() => {
-                  setPage((p) => Math.max(1, p - 1));
-                  void fetchInvitations(false);
+                  const next = Math.max(1, page - 1);
+                  setPage(next);
+                  void fetchInvitations(false, next);
                 }}
-                disabled={page <= 1}
+                                disabled={page <= 1}
                 className="rounded-md border px-2 py-1 hover:bg-gray-50 disabled:opacity-50"
               >
                 Prev
@@ -536,8 +545,9 @@ export default function InvitationManagementPage() {
               <span className="px-2">{page} / {totalPages}</span>
               <button
                 onClick={() => {
-                  setPage((p) => Math.min(totalPages, p + 1));
-                  void fetchInvitations(false);
+                  const next = Math.min(totalPages, page + 1);
+                  setPage(next);
+                  void fetchInvitations(false, next);
                 }}
                 disabled={page >= totalPages}
                 className="rounded-md border px-2 py-1 hover:bg-gray-50 disabled:opacity-50"

@@ -1,91 +1,127 @@
 'use client';
 
-import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { getRecaptchaToken } from "@/lib/security/recaptcha-client";
-import { useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { getRecaptchaToken } from '@/lib/security/recaptcha-client';
+
+type Status = 'loading' | 'success' | 'error';
+
+type AcceptInviteResponse = {
+  success?: boolean;
+  error?: string;
+};
 
 export default function AcceptInvitePage() {
   const searchParams = useSearchParams();
-  const token = searchParams.get("token");
-
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
-  const [message, setMessage] = useState("");
   const router = useRouter();
 
-  useEffect(() => {
-    const acceptInvite = async () => {
-      try {
-        if (!token) {
-          setStatus("error");
-          setMessage("Invalid invitation link.");
-          return;
-        }
+  const inviteToken = searchParams.get('token');
 
-        const {
-          
-          data: { session },
-        } = await supabase.auth.getSession();
+  const [status, setStatus] = useState<Status>('loading');
+  const [message, setMessage] = useState<string>('');
+
+  useEffect(() => {
+    if (!inviteToken) {
+      setStatus('error');
+      setMessage('Invalid invitation link.');
+      return;
+    }
+
+    const acceptInvitation = async () => {
+      try {
+        /* ===============================
+           CHECK USER SESSION
+        =============================== */
+
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
+
+        if (sessionError) throw sessionError;
+
+        const session = sessionData.session;
 
         if (!session) {
-          router.push(`/signup?inviteToken=${token}`);
+          router.push(`/signup?inviteToken=${inviteToken}`);
           return;
         }
 
-        const recaptchaToken = await getRecaptchaToken(
-          process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY!,
-          "invite_accept"
-        );
+        /* ===============================
+           GET RECAPTCHA TOKEN
+        =============================== */
 
-        const res = await fetch("/api/invitations/accept", {
-          method: "POST",
+        const captchaToken = await getRecaptchaToken('invite_accept');
+
+        /* ===============================
+           CALL ACCEPT INVITE API
+        =============================== */
+
+        const response = await fetch('/api/invitations/accept', {
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
             Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            inviteToken: token,
-            recaptchaToken,
+            inviteToken,
+            recaptchaToken: captchaToken,
           }),
         });
 
-        const data = await res.json();
+        const result: AcceptInviteResponse = await response.json();
 
-        if (!res.ok) {
-          throw new Error(data.error || "Failed to accept invitation");
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to accept invitation.');
         }
 
-        setStatus("success");
-        setMessage("Invitation accepted successfully!");
+        /* ===============================
+           SUCCESS
+        =============================== */
 
-      } catch (err: any) {
-        setStatus("error");
-        setMessage(err.message);
+        setStatus('success');
+        setMessage('Invitation accepted successfully.');
+
+        // Optional redirect after success
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 1500);
+
+      } catch (error: unknown) {
+        const msg =
+          error instanceof Error
+            ? error.message
+            : 'Unexpected error occurred while accepting the invitation.';
+
+        setStatus('error');
+        setMessage(msg);
       }
     };
 
-    acceptInvite();
-  }, [token]);
+    acceptInvitation();
+  }, [inviteToken, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-96 text-center">
 
-        {status === "loading" && (
-          <p>Processing invitation...</p>
+        {status === 'loading' && (
+          <p className="text-gray-600">Processing invitation...</p>
         )}
 
-        {status === "success" && (
+        {status === 'success' && (
           <div>
-            <h2 className="text-lg font-semibold mb-2">Success</h2>
+            <h2 className="text-lg font-semibold mb-2 text-green-600">
+              Success
+            </h2>
             <p>{message}</p>
           </div>
         )}
 
-        {status === "error" && (
+        {status === 'error' && (
           <div>
-            <h2 className="text-lg font-semibold mb-2 text-red-600">Error</h2>
+            <h2 className="text-lg font-semibold mb-2 text-red-600">
+              Error
+            </h2>
             <p>{message}</p>
           </div>
         )}
