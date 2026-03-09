@@ -45,8 +45,11 @@ function toCSV(rows: any[]): string {
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest, context: RouteContext) {
-  const { id } = context.params;
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const { id } = await context.params;
 
   return secureRoute(
     req,
@@ -61,14 +64,20 @@ export async function GET(req: NextRequest, context: RouteContext) {
       const reportId = id;
 
       if (!reportId) {
-        return NextResponse.json({ error: "Missing report id" }, { status: 400 });
-      }
-
-      if (!profile.org_id) {
-        return NextResponse.json({ error: "User not attached to organization" }, { status: 403 });
+        return NextResponse.json(
+          { error: "Missing report id" },
+          { status: 400 }
+        );
       }
 
       const orgId = profile.org_id;
+
+      if (!orgId) {
+        return NextResponse.json(
+          { error: "User not attached to organization" },
+          { status: 403 }
+        );
+      }
 
       const url = new URL(req.url);
       const format = (url.searchParams.get("format") || "json").toLowerCase();
