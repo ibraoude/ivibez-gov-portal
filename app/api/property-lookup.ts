@@ -109,10 +109,12 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   return data[0];
 }
 
-export async function OPTIONS() {
+export async function OPTIONS(req: Request) {
+  const origin = req.headers.get("origin");
+
   return new Response(null, {
     status: 204,
-    headers: corsHeaders
+    headers: getCorsHeaders(origin)
   });
 }
 export async function POST(req: Request) {
