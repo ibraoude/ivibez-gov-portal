@@ -2,10 +2,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Database } from "@/types/database";
+import type { Database, TablesInsert, TablesUpdate } from '@/types/database';
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 import { createClient } from '@/lib/supabase/client';
-import { getPermissions, Role } from "@/lib/permissions/roles";
+import { getPermissions, Role } from '@/lib/permissions/roles';
 
 import {
   Building2,
@@ -21,51 +21,13 @@ import {
   Search,
 } from 'lucide-react';
 
-function clean(v?: string | null): string | null {
-  if (!v) return null;
-  const t = v.trim();
-  return t.length ? t : null;
-}
+/* =========================================================
+   Types driven by Supabase schema
+   ========================================================= */
 
-/* ==================== Helpers ==================== */
-
-// Build invite URL like https://your-app.com/signup?org_id=...
-function buildInviteUrl(orgId: string) {
-  const origin =
-    typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'https://your-app.example.com'; // fallback for SSR
-
-  const url = new URL('/signup', origin);
-  url.searchParams.set('org_id', orgId);
-  return url.toString();
-}
-
-/* ==================== Types (EXACTLY your tables) ==================== */
-
-type Organization = {
-  id: string; // uuid
-  name: string;
-  created_at: string | null; // timestamptz
-  created_by: string; // uuid
-  agency_type: string | null;
-  gov_domain: string | null;
-  // normalized_name is generated; do not send from client
-  legal_name: string | null;
-  email: string;
-  phone: string | null;
-  website: string | null;
-  logo_url: string | null;
-  address_line1: string | null;
-  address_line2: string | null;
-  city: string;
-  state: string | null;
-  postal_code: string | null;
-  country: string;
-  allow_self_registration: boolean | null;
-  require_admin_approval: boolean | null;
-  updated_at: string | null; // timestamptz
-};
+type Organization = Database['public']['Tables']['organizations']['Row'];
+type OrgInsert = TablesInsert<'organizations'>;
+type OrgUpdate = TablesUpdate<'organizations'>;
 
 type ProfileLite = {
   id: string;
@@ -73,15 +35,62 @@ type ProfileLite = {
   role: Role | null;
 };
 
-type OrgInsert = Database["public"]["Tables"]["organizations"]["Insert"];
-
 // Global admin membership row
 type AdminUser = { user_id: string };
 
-/* ==================== Page ==================== */
+/**
+ * UI form model (strings only) — decoupled from DB nullability.
+ * You can initialize and bind inputs without juggling nulls/undefined.
+ */
+type OrgForm = {
+  name: string;
+  legal_name: string;
+  email: string;
+  phone: string;
+  website: string;
+  agency_type: string;
+  gov_domain: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  country: string;
+};
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+
+// For NULLable text columns: return trimmed string or null if empty/missing
+function toNull(v?: string | null): string | null {
+  const t = v?.trim();
+  return t && t.length > 0 ? t : null;
+}
+
+// For NOT NULL text columns: always return a string ('' allowed)
+function toStr(v?: string | null): string {
+  return (v ?? '').trim();
+}
+
+// Build invite URL like https://your-app.com/signup?org_id=...
+function buildInviteUrl(orgId: string) {
+  const origin =
+    typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : 'https://your-app.example.com'; // fallback for SSR/pre-render
+  const url = new URL('/signup', origin);
+  url.searchParams.set('org_id', orgId);
+  return url.toString();
+}
+
+/* =========================================================
+   Page
+   ========================================================= */
 
 export default function OrganizationsDirectoryPage() {
   const supabase = createClient();
+
   // Auth / profile
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileLite | null>(null);
@@ -101,25 +110,8 @@ export default function OrganizationsDirectoryPage() {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [draft, setDraft] = useState<Organization | null>(null);
 
-  // Create form
-  const [newOrg, setNewOrg] = useState<
-    Pick<
-      Organization,
-      | 'name'
-      | 'legal_name'
-      | 'email'
-      | 'phone'
-      | 'website'
-      | 'agency_type'
-      | 'gov_domain'
-      | 'address_line1'
-      | 'address_line2'
-      | 'city'
-      | 'state'
-      | 'postal_code'
-      | 'country'
-    >
-  >({
+  // Create form (strings-only)
+  const [newOrg, setNewOrg] = useState<OrgForm>({
     name: '',
     legal_name: '',
     email: '',
@@ -143,26 +135,20 @@ export default function OrganizationsDirectoryPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Refs for Google Places (create form + edit form)
+  // Refs for Google Places (create form + edit form) and logo file input
   const createAddressRef = useRef<HTMLInputElement | null>(null);
   const editAddressRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Permissions
-  // - global admin can edit any org
-  // - org admins/super_admins can edit their own org
+  // Permissions: global admin OR org admins/super_admins can edit own org
   const permissions = getPermissions(profile?.role ?? null);
-
   const canEdit =
     isGlobalAdmin ||
-    (
-      permissions?.manageOrganization &&
-      organization &&
-      profile &&
-      organization.id === profile.org_id
-    );
+    (permissions?.manageOrganization && organization && profile && organization.id === profile.org_id);
 
-  /* ==================== Data loading ==================== */
+  /* =========================================================
+     Data loading
+     ========================================================= */
 
   async function loadAllOrgsForGlobalAdmin() {
     const { data, error } = await supabase.from('organizations').select('*').order('name', { ascending: true });
@@ -220,7 +206,6 @@ export default function OrganizationsDirectoryPage() {
           .maybeSingle();
 
         const adminRow = data as AdminUser | null;
-
         setIsGlobalAdmin(!!adminRow);
 
         // Profile (org & role)
@@ -256,9 +241,7 @@ export default function OrganizationsDirectoryPage() {
           setOrgList(ownOrg ? [ownOrg as Organization] : []);
         }
 
-        // NOTE: details panel is empty until user clicks a row (as requested)
-        // selectedOrgId remains null
-
+        // NOTE: details panel is empty until user clicks a row
       } catch (e) {
         console.error(e);
         setMessage({ type: 'error', text: 'Unexpected error loading organizations.' });
@@ -266,6 +249,7 @@ export default function OrganizationsDirectoryPage() {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load details on selection
@@ -276,9 +260,12 @@ export default function OrganizationsDirectoryPage() {
       return;
     }
     loadSingleOrg(selectedOrgId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrgId]);
 
-  /* ==================== Google Places Autocomplete ==================== */
+  /* =========================================================
+     Google Places Autocomplete (create & edit address line 1)
+     ========================================================= */
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!key) {
@@ -290,16 +277,16 @@ export default function OrganizationsDirectoryPage() {
     let cancelled = false;
 
     (async () => {
-  try {
-    setOptions({ key, v: 'weekly' });
+      try {
+        setOptions({ key, v: 'weekly' });
 
-    const placesLib = await importLibrary("places");
-    const { Autocomplete } = placesLib as google.maps.PlacesLibrary;
+        const placesLib = await importLibrary('places');
+        const { Autocomplete } = placesLib as google.maps.PlacesLibrary;
 
-    const read = (type: string, comps: any[], short = false) => {
-      const f = comps.find((c: any) => c.types.includes(type));
-      return f ? (short ? f.short_name : f.long_name) : '';
-    };
+        const read = (type: string, comps: google.maps.GeocoderAddressComponent[], short = false) => {
+          const f = comps.find((c) => c.types.includes(type));
+          return f ? (short ? f.short_name : f.long_name) : '';
+        };
 
         const bind = (
           el: HTMLInputElement,
@@ -319,7 +306,7 @@ export default function OrganizationsDirectoryPage() {
 
           const listener = ac.addListener('place_changed', () => {
             const place = ac.getPlace();
-            const comps: any[] = place?.address_components || [];
+            const comps = (place?.address_components || []) as google.maps.GeocoderAddressComponent[];
             const streetNumber = read('street_number', comps);
             const route = read('route', comps);
 
@@ -335,7 +322,9 @@ export default function OrganizationsDirectoryPage() {
           return () => {
             try {
               listener.remove();
-            } catch {}
+            } catch {
+              /* noop */
+            }
           };
         };
 
@@ -347,9 +336,7 @@ export default function OrganizationsDirectoryPage() {
           !createAddressRef.current.readOnly &&
           !createAddressRef.current.disabled
         ) {
-          cleanups.push(
-            bind(createAddressRef.current, (parts) => setNewOrg((p) => ({ ...p, ...parts })))
-          );
+          cleanups.push(bind(createAddressRef.current, (parts) => setNewOrg((p) => ({ ...p, ...parts }))));
         }
 
         // EDIT
@@ -374,9 +361,12 @@ export default function OrganizationsDirectoryPage() {
       cleanups.forEach((fn) => fn());
     };
     // Keep deps minimal; .current values allow rebind when inputs mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ==================== Actions ==================== */
+  /* =========================================================
+     Actions
+     ========================================================= */
 
   // Save (update)
   async function saveOrganization() {
@@ -389,26 +379,31 @@ export default function OrganizationsDirectoryPage() {
     setSaving(true);
     setMessage(null);
 
-  type OrgUpdate = Database["public"]["Tables"]["organizations"]["Update"];
+    const payload: OrgUpdate = {
+      // NOT NULL text → string
+      name: toStr(draft.name),
+      email: toStr(draft.email),
+      city: toStr(draft.city),
+      country: toStr(draft.country),
 
-  const payload: OrgUpdate = {
-    name: draft.name.trim(),
-    legal_name: draft.legal_name?.trim() ?? "",
-    email: draft.email?.trim(),
-    phone: draft.phone?.trim() ?? "",
-    website: draft.website?.trim() ?? "",
-    agency_type: draft.agency_type?.trim() ?? "",
-    gov_domain: draft.gov_domain?.trim() ?? "",
-    address_line1: draft.address_line1?.trim() ?? "",
-    address_line2: draft.address_line2?.trim() ?? "",
-    city: draft.city?.trim(),
-    state: draft.state?.trim() ?? "",
-    postal_code: draft.postal_code?.trim() ?? "",
-    country: draft.country?.trim(),
-    allow_self_registration: draft.allow_self_registration ?? false,
-    require_admin_approval: draft.require_admin_approval ?? true,
-    updated_at: new Date().toISOString(),
-  };
+      // NULLable text → string | null
+      legal_name: toNull(draft.legal_name),
+      agency_type: toNull(draft.agency_type),
+      gov_domain: toNull(draft.gov_domain),
+      website: toNull(draft.website),
+      phone: toNull(draft.phone),
+      address_line1: toNull(draft.address_line1),
+      address_line2: toNull(draft.address_line2),
+      state: toNull(draft.state),
+      postal_code: toNull(draft.postal_code),
+
+      // Booleans
+      allow_self_registration: draft.allow_self_registration ?? false,
+      require_admin_approval: draft.require_admin_approval ?? true,
+
+      // updated_at: DB trigger can handle this; keep or remove as you prefer
+      updated_at: new Date().toISOString(),
+    };
 
     const { error } = await supabase.from('organizations').update(payload).eq('id', organization.id);
     setSaving(false);
@@ -419,7 +414,7 @@ export default function OrganizationsDirectoryPage() {
       return;
     }
 
-    setOrganization({ ...organization, ...payload });
+    setOrganization({ ...organization, ...payload } as Organization);
     setDraft((d) => (d ? ({ ...d, ...payload } as Organization) : d));
     setMessage({ type: 'success', text: 'Organization updated successfully.' });
 
@@ -431,110 +426,116 @@ export default function OrganizationsDirectoryPage() {
 
   // Create organization
   async function createOrganization() {
-
     if (!currentUserId) {
-      setMessage({ type: "error", text: "You must be signed in." });
+      setMessage({ type: 'error', text: 'You must be signed in.' });
       return;
     }
 
     if (!newOrg.name.trim()) {
-      setMessage({ type: "error", text: "Organization name is required." });
+      setMessage({ type: 'error', text: 'Organization name is required.' });
       return;
     }
 
     if (profile?.org_id) {
       setMessage({
-        type: "error",
-        text: "You already belong to an organization.",
+        type: 'error',
+        text: 'You already belong to an organization.',
       });
       return;
     }
 
-   const payload: OrgInsert = {
-      name: newOrg.name.trim(),
-      legal_name: clean(newOrg.legal_name),
-      email: newOrg.email?.trim() ?? "",
-      phone: newOrg.phone?.trim() ?? "",
-      website: newOrg.website?.trim() ?? "",
-      agency_type: newOrg.agency_type?.trim() ?? "",
-      gov_domain: newOrg.gov_domain?.trim() ?? "",
-      address_line1: newOrg.address_line1?.trim() ?? "",
-      address_line2: newOrg.address_line2?.trim() ?? "",
-      city: newOrg.city?.trim() ?? "",
-      state: clean(newOrg.state),
-      postal_code: clean(newOrg.postal_code),
-      country: newOrg.country?.trim() ?? "",
+    const payload: OrgInsert = {
+      // Required per schema
+      name: toStr(newOrg.name),
+      created_by: currentUserId,
+
+      // NOT NULL text
+      email: toStr(newOrg.email),
+      city: toStr(newOrg.city),
+      country: toStr(newOrg.country),
+
+      // NULLable text
+      legal_name: toNull(newOrg.legal_name),
+      agency_type: toNull(newOrg.agency_type),
+      gov_domain: toNull(newOrg.gov_domain),
+      website: toNull(newOrg.website),
+      phone: toNull(newOrg.phone),
+      address_line1: toNull(newOrg.address_line1),
+      address_line2: toNull(newOrg.address_line2),
+      state: toNull(newOrg.state),
+      postal_code: toNull(newOrg.postal_code),
+
+      // Booleans: you have defaults in DB; you can omit them to use defaults,
+      // or set explicitly if you want to enforce UI defaults:
       allow_self_registration: false,
       require_admin_approval: true,
-      created_by: currentUserId,
+
+      // Timestamps: created_at has default; updated_at has default + trigger on update.
+      // Omit on INSERT unless you want to override.
+      // updated_at: new Date().toISOString(),
     };
 
     setSaving(true);
 
     // 1️⃣ Create organization
     const { data, error } = await supabase
-      .from("organizations")
-      .insert([payload])
+      .from('organizations')
+      .insert([payload]) // array form works across client versions
       .select()
       .single();
 
     if (error || !data) {
       setSaving(false);
-      setMessage({ type: "error", text: error?.message || "Failed to create organization." });
+      setMessage({ type: 'error', text: error?.message || 'Failed to create organization.' });
       return;
     }
 
     // 2️⃣ Attach user to organization
     const { error: profileError } = await supabase
-      .from("profiles")
+      .from('profiles')
       .update({
         org_id: data.id,
-        role: "owner",
+        role: 'owner',
       })
-      .eq("id", currentUserId);
+      .eq('id', currentUserId);
 
     if (profileError) {
       setSaving(false);
       setMessage({
-        type: "error",
-        text: "Organization created but profile could not be attached.",
+        type: 'error',
+        text: 'Organization created but profile could not be attached.',
       });
       return;
     }
 
     // 3️⃣ Update local state
-    setProfile((prev) =>
-      prev ? { ...prev, org_id: data.id, role: "owner" } : prev
-    );
-
-    setOrgList([data]);
+    setProfile((prev) => (prev ? { ...prev, org_id: data.id, role: 'owner' } : prev));
+    setOrgList([data as Organization]);
     setSelectedOrgId(data.id);
     setCreating(false);
 
     setNewOrg({
-      name: "",
-      legal_name: "",
-      email: "",
-      phone: "",
-      website: "",
-      agency_type: "",
-      gov_domain: "",
-      address_line1: "",
-      address_line2: "",
-      city: "",
-      state: "",
-      postal_code: "",
-      country: "",
+      name: '',
+      legal_name: '',
+      email: '',
+      phone: '',
+      website: '',
+      agency_type: '',
+      gov_domain: '',
+      address_line1: '',
+      address_line2: '',
+      city: '',
+      state: '',
+      postal_code: '',
+      country: '',
     });
 
     setSaving(false);
-
     setMessage({
-      type: "success",
-      text: "Organization created successfully.",
+      type: 'success',
+      text: 'Organization created successfully.',
     });
   }
-  
 
   // Logo upload to 'org-logos' bucket
   async function onLogoSelected(file?: File | null) {
@@ -583,8 +584,10 @@ export default function OrganizationsDirectoryPage() {
       .catch(() => setMessage({ type: 'error', text: 'Could not copy link.' }));
   }
 
-  /* ==================== Derived: filtered rows ==================== */
- const q = search.trim().toLowerCase();
+  /* =========================================================
+     Derived: filtered rows
+     ========================================================= */
+  const q = search.trim().toLowerCase();
 
   const filteredRows = !q
     ? orgList
@@ -602,11 +605,13 @@ export default function OrganizationsDirectoryPage() {
           city.includes(q) ||
           state.includes(q)
         );
-    });
-  /* ==================== Render ==================== */
+      });
+
+  /* =========================================================
+     Render
+     ========================================================= */
 
   if (loading) return <div className="p-10 text-gray-500">Loading organizations…</div>;
-
 
   return (
     <div className="space-y-6">
@@ -716,7 +721,9 @@ export default function OrganizationsDirectoryPage() {
           </div>
 
           {!isGlobalAdmin && (
-            <p className="mt-3 text-xs text-gray-500">You don’t have global admin permissions. Only your own organization is visible.</p>
+            <p className="mt-3 text-xs text-gray-500">
+              You don’t have global admin permissions. Only your own organization is visible.
+            </p>
           )}
         </section>
 
@@ -751,25 +758,26 @@ export default function OrganizationsDirectoryPage() {
               <div className="text-lg font-semibold mb-4">Create Organization</div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Name *" value={newOrg.name} onChange={(v) => setNewOrg((p) => ({ ...p, name: v }))} />
-                <Field label="Legal Name" value={newOrg.legal_name ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, legal_name: v }))} />
-                <Field label="Email" value={newOrg.email ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, email: v }))} />
-                <Field label="Phone" value={newOrg.phone ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, phone: v }))} />
-                <Field label="Website" value={newOrg.website ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, website: v }))} placeholder="https://..." />
-                <Field label="Agency Type" value={newOrg.agency_type ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, agency_type: v }))} />
-                <Field label="Gov Domain" value={newOrg.gov_domain ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, gov_domain: v }))} placeholder="e.g., agency.gov" />
+                <Field label="Legal Name" value={newOrg.legal_name} onChange={(v) => setNewOrg((p) => ({ ...p, legal_name: v }))} />
+                <Field label="Email" value={newOrg.email} onChange={(v) => setNewOrg((p) => ({ ...p, email: v }))} />
+                <Field label="Phone" value={newOrg.phone} onChange={(v) => setNewOrg((p) => ({ ...p, phone: v }))} />
+                <Field label="Website" value={newOrg.website} onChange={(v) => setNewOrg((p) => ({ ...p, website: v }))} placeholder="https://..." />
+                <Field label="Agency Type" value={newOrg.agency_type} onChange={(v) => setNewOrg((p) => ({ ...p, agency_type: v }))} />
+                <Field label="Gov Domain" value={newOrg.gov_domain} onChange={(v) => setNewOrg((p) => ({ ...p, gov_domain: v }))} placeholder="e.g., agency.gov" />
 
                 {/* Address line 1 (CREATE) — Places ref */}
                 <Field
                   label="Address line 1"
-                  value={newOrg.address_line1 ?? ''}
+                  value={newOrg.address_line1}
                   onChange={(v) => setNewOrg((p) => ({ ...p, address_line1: v }))}
                   inputRef={createAddressRef}
+                  placeholder="Start typing to search…"
                 />
-                <Field label="Address line 2" value={newOrg.address_line2 ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, address_line2: v }))} />
-                <Field label="City" value={newOrg.city ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, city: v }))} />
-                <Field label="State / Province" value={newOrg.state ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, state: v }))} />
-                <Field label="Postal Code" value={newOrg.postal_code ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, postal_code: v }))} />
-                <Field label="Country" value={newOrg.country ?? ''} onChange={(v) => setNewOrg((p) => ({ ...p, country: v }))} />
+                <Field label="Address line 2" value={newOrg.address_line2} onChange={(v) => setNewOrg((p) => ({ ...p, address_line2: v }))} />
+                <Field label="City" value={newOrg.city} onChange={(v) => setNewOrg((p) => ({ ...p, city: v }))} />
+                <Field label="State / Province" value={newOrg.state} onChange={(v) => setNewOrg((p) => ({ ...p, state: v }))} />
+                <Field label="Postal Code" value={newOrg.postal_code} onChange={(v) => setNewOrg((p) => ({ ...p, postal_code: v }))} />
+                <Field label="Country" value={newOrg.country} onChange={(v) => setNewOrg((p) => ({ ...p, country: v }))} />
               </div>
 
               <div className="mt-4 flex items-center gap-2">
@@ -826,17 +834,54 @@ export default function OrganizationsDirectoryPage() {
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Organization Name" value={draft.name} readOnly={!canEdit} onChange={(v) => setDraft((prev) => prev ? { ...prev, name: v } : prev)} />
-                    <Field label="Legal Name" value={draft.legal_name ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, legal_name: v })} />
-                    <Field label="Agency Type" value={draft.agency_type ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, agency_type: v })} />
-                    <Field label="Gov Domain" value={draft.gov_domain ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, gov_domain: v })} placeholder="e.g., agency.gov" />
-                    <Field label="Website" value={draft.website ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, website: v })} placeholder="https://..." />
+                    <Field
+                      label="Organization Name"
+                      value={draft.name ?? ''}
+                      readOnly={!canEdit}
+                      onChange={(v) => setDraft((prev) => (prev ? { ...prev, name: v } : prev))}
+                    />
+                    <Field
+                      label="Legal Name"
+                      value={draft.legal_name ?? ''}
+                      readOnly={!canEdit}
+                      onChange={(v) => setDraft((prev) => (prev ? { ...prev, legal_name: v } : prev))}
+                    />
+                    <Field
+                      label="Agency Type"
+                      value={draft.agency_type ?? ''}
+                      readOnly={!canEdit}
+                      onChange={(v) => setDraft((prev) => (prev ? { ...prev, agency_type: v } : prev))}
+                    />
+                    <Field
+                      label="Gov Domain"
+                      value={draft.gov_domain ?? ''}
+                      readOnly={!canEdit}
+                      onChange={(v) => setDraft((prev) => (prev ? { ...prev, gov_domain: v } : prev))}
+                      placeholder="e.g., agency.gov"
+                    />
+                    <Field
+                      label="Website"
+                      value={draft.website ?? ''}
+                      readOnly={!canEdit}
+                      onChange={(v) => setDraft((prev) => (prev ? { ...prev, website: v } : prev))}
+                      placeholder="https://..."
+                    />
                   </div>
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  <Field label="Email" value={draft.email ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, email: v })} />
-                  <Field label="Phone" value={draft.phone ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, phone: v })} />
+                  <Field
+                    label="Email"
+                    value={draft.email ?? ''}
+                    readOnly={!canEdit}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, email: v } : prev))}
+                  />
+                  <Field
+                    label="Phone"
+                    value={draft.phone ?? ''}
+                    readOnly={!canEdit}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, phone: v } : prev))}
+                  />
                 </div>
               </section>
 
@@ -848,19 +893,40 @@ export default function OrganizationsDirectoryPage() {
                     label="Address line 1"
                     value={draft.address_line1 ?? ''}
                     readOnly={!canEdit}
-                    onChange={(v) => setDraft({ ...draft, address_line1: v })}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, address_line1: v } : prev))}
                     inputRef={editAddressRef}
+                    placeholder="Start typing to search…"
                   />
                   <Field
                     label="Address line 2"
                     value={draft.address_line2 ?? ''}
                     readOnly={!canEdit}
-                    onChange={(v) => setDraft({ ...draft, address_line2: v })}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, address_line2: v } : prev))}
                   />
-                  <Field label="City" value={draft.city ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, city: v })} />
-                  <Field label="State / Province" value={draft.state ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, state: v })} />
-                  <Field label="Postal Code" value={draft.postal_code ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, postal_code: v })} />
-                  <Field label="Country" value={draft.country ?? ''} readOnly={!canEdit} onChange={(v) => setDraft({ ...draft, country: v })} />
+                  <Field
+                    label="City"
+                    value={draft.city ?? ''}
+                    readOnly={!canEdit}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, city: v } : prev))}
+                  />
+                  <Field
+                    label="State / Province"
+                    value={draft.state ?? ''}
+                    readOnly={!canEdit}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, state: v } : prev))}
+                  />
+                  <Field
+                    label="Postal Code"
+                    value={draft.postal_code ?? ''}
+                    readOnly={!canEdit}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, postal_code: v } : prev))}
+                  />
+                  <Field
+                    label="Country"
+                    value={draft.country ?? ''}
+                    readOnly={!canEdit}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, country: v } : prev))}
+                  />
                 </div>
               </SectionCard>
 
@@ -871,14 +937,14 @@ export default function OrganizationsDirectoryPage() {
                     label="Allow self registration"
                     checked={!!draft.allow_self_registration}
                     disabled={!canEdit}
-                    onChange={(v) => setDraft({ ...draft, allow_self_registration: v })}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, allow_self_registration: v } : prev))}
                     help="If enabled, users can sign up and request to join this organization."
                   />
                   <Toggle
                     label="Require admin approval"
                     checked={draft.require_admin_approval ?? true}
                     disabled={!canEdit}
-                    onChange={(v) => setDraft({ ...draft, require_admin_approval: v })}
+                    onChange={(v) => setDraft((prev) => (prev ? { ...prev, require_admin_approval: v } : prev))}
                     help="If enabled, an admin must approve new member requests."
                   />
                 </div>
@@ -938,7 +1004,9 @@ export default function OrganizationsDirectoryPage() {
   );
 }
 
-/* ==================== Reusable UI ==================== */
+/* =========================================================
+   Reusable UI
+   ========================================================= */
 
 function SectionCard({
   icon,

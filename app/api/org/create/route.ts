@@ -3,6 +3,8 @@ import { logAudit } from "@/lib/audit/log-audit";
 import { NextRequest } from "next/server";
 import { Database } from "@/types/database";
 
+type OrgInsert = Database["public"]["Tables"]["organizations"]["Insert"];
+
 export async function POST(req: NextRequest) {
   return secureRoute(
     req,
@@ -14,16 +16,12 @@ export async function POST(req: NextRequest) {
       logCaptcha: true,
     },
     async ({ user, supabase, body, captcha }) => {
-
       const orgName = String(body?.orgName || "").trim();
 
       if (!orgName) {
         throw new Error("orgName required");
       }
 
-      /* ===============================
-         CREATE ORGANIZATION
-      =============================== */
       const { data: existing } = await supabase
         .from("organizations")
         .select("id")
@@ -35,22 +33,23 @@ export async function POST(req: NextRequest) {
         throw new Error("You already created an organization with this name");
       }
 
+      const orgPayload: OrgInsert = {
+        name: orgName,
+        created_by: user.id,
+        email: "",
+        city: "",
+        country: "",
+      };
+
       const { data: org, error: orgError } = await supabase
         .from("organizations")
-        .insert({
-          name: orgName,
-          created_by: user.id,
-        })
+        .insert(orgPayload)
         .select()
         .single();
 
       if (orgError || !org) {
         throw new Error(orgError?.message || "Failed to create organization");
       }
-
-      /* ===============================
-         ATTACH USER AS OWNER
-      =============================== */
 
       const { error: profileError } = await supabase
         .from("profiles")
@@ -65,10 +64,6 @@ export async function POST(req: NextRequest) {
       if (profileError) {
         throw new Error(profileError.message);
       }
-
-      /* ===============================
-         AUDIT LOG
-      =============================== */
 
       await logAudit({
         supabase,

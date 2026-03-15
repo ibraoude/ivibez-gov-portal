@@ -1,14 +1,25 @@
-  import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization"
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
-);
+
+type LeadInput = Record<string, any>;
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders,
+    },
+  });
+}
 
 function toNumber(value: unknown): number {
   if (value === null || value === undefined) return 0;
@@ -17,7 +28,13 @@ function toNumber(value: unknown): number {
   return Number.isFinite(num) ? num : 0;
 }
 
-function calculateLeadScore(lead: Record<string, any>): number {
+function isYes(value: unknown): boolean {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase() === "yes";
+}
+
+function calculateLeadScore(lead: LeadInput): number {
   let score = 20;
 
   const motivation = String(lead.motivation || "").toLowerCase();
@@ -37,12 +54,15 @@ function calculateLeadScore(lead: Record<string, any>): number {
     score += 15;
   }
 
-  if (timeline.includes("asap") || timeline.includes("30")) score += 20;
-  else if (timeline.includes("1-3") || timeline.includes("1–3")) score += 10;
+  if (timeline.includes("asap") || timeline.includes("30")) {
+    score += 20;
+  } else if (timeline.includes("1-3") || timeline.includes("1–3")) {
+    score += 10;
+  }
 
-  if (String(lead.price_negotiable || "").toLowerCase() === "yes") score += 10;
-  if (String(lead.quick_close_negotiable || "").toLowerCase() === "yes") score += 10;
-  if (String(lead.decision_ready || "").toLowerCase() === "yes") score += 10;
+  if (isYes(lead.price_negotiable)) score += 10;
+  if (isYes(lead.quick_close_negotiable)) score += 10;
+  if (isYes(lead.decision_ready)) score += 10;
 
   if (toNumber(lead.amount_behind_mortgage) > 0) score += 10;
   if (toNumber(lead.amount_back_taxes) > 0) score += 10;
@@ -50,17 +70,19 @@ function calculateLeadScore(lead: Record<string, any>): number {
   return Math.min(score, 100);
 }
 
-function estimateRepairs(lead: Record<string, any>): number {
+function estimateRepairs(lead: LeadInput): number {
   let repairs = 0;
+
   if (lead.structural) repairs += 15000;
   if (lead.mechanical) repairs += 10000;
   if (lead.foundation) repairs += 20000;
+
   return repairs;
 }
 
 function calculateOffer(arv: number, repairs: number): number {
   if (!arv) return 0;
-  return Math.max((arv * 0.7) - repairs, 0);
+  return Math.max(arv * 0.7 - repairs, 0);
 }
 
 function calculateProfit(arv: number, offer: number): number {
@@ -68,14 +90,53 @@ function calculateProfit(arv: number, offer: number): number {
   return Math.max(arv - offer, 0);
 }
 
-async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
-  const address = [
+function buildAddress(lead: LeadInput): string {
+  return [
     lead.property_address,
     lead.city,
     lead.state,
-    lead.zip
-  ].filter(Boolean).join(", ");
+    lead.zip,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
 
+async function verifyCaptcha(captchaToken: string | undefined): Promise<boolean> {
+  const recaptchaSecret = process.env.RECAPTCHA_SECRET;
+
+  if (!recaptchaSecret) {
+    throw new Error("Missing RECAPTCHA_SECRET environment variable.");
+  }
+
+  if (!captchaToken) return false;
+
+  const response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      secret: recaptchaSecret,
+      response: captchaToken,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`reCAPTCHA verification failed with status ${response.status}`);
+  }
+
+  const captcha = await response.json();
+  return Boolean(captcha?.success) && Number(captcha?.score ?? 0) >= 0.5;
+}
+
+async function fetchPropertyDataFromRentCast(lead: LeadInput) {
+  const rentCastApiKey = process.env.RENTCAST_API_KEY;
+  if (!rentCastApiKey) {
+    throw new Error("Missing RENTCAST_API_KEY environment variable.");
+  }
+
+  const address = buildAddress(lead);
   if (!address) return null;
 
   const url = new URL("https://api.rentcast.io/v1/properties");
@@ -84,9 +145,10 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   const res = await fetch(url.toString(), {
     method: "GET",
     headers: {
-      "X-Api-Key": process.env.RENTCAST_API_KEY!,
-      "Accept": "application/json"
-    }
+      "X-Api-Key": rentCastApiKey,
+      Accept: "application/json",
+    },
+    cache: "no-store",
   });
 
   if (!res.ok) {
@@ -95,93 +157,93 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   }
 
   const data = await res.json();
-  if (!Array.isArray(data) || data.length === 0) return null;
+
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+
   return data[0];
+}
+
+function extractEstimatedArv(propertyApiPayload: any): number {
+  return (
+    toNumber(propertyApiPayload?.value) ||
+    toNumber(propertyApiPayload?.price) ||
+    toNumber(propertyApiPayload?.avm) ||
+    0
+  );
+}
+
+function enrichLeadWithPropertyData(lead: LeadInput, propertyApiPayload: any): LeadInput {
+  const enrichedLead = { ...lead };
+
+  if (!enrichedLead.property_sqft && propertyApiPayload?.squareFootage) {
+    enrichedLead.property_sqft = propertyApiPayload.squareFootage;
+  }
+
+  if (!enrichedLead.year_built && propertyApiPayload?.yearBuilt) {
+    enrichedLead.year_built = propertyApiPayload.yearBuilt;
+  }
+
+  if (!enrichedLead.bedrooms && propertyApiPayload?.bedrooms) {
+    enrichedLead.bedrooms = propertyApiPayload.bedrooms;
+  }
+
+  if (!enrichedLead.bathrooms && propertyApiPayload?.bathrooms) {
+    enrichedLead.bathrooms = propertyApiPayload.bathrooms;
+  }
+
+  return enrichedLead;
 }
 
 export async function OPTIONS() {
   return new Response(null, {
     status: 204,
-    headers: corsHeaders
+    headers: corsHeaders,
   });
 }
+
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { captchaToken, ...lead } = body;
-
-  // 1) Verify reCAPTCHA v3
-  const captchaVerify = await fetch(
-    "https://www.google.com/recaptcha/api/siteverify",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        secret: process.env.RECAPTCHA_SECRET!,
-        response: captchaToken
-      })
-    }
-  );
-
-  const captcha = await captchaVerify.json();
-
-  if (!captcha.success || captcha.score < 0.5) {
-    return new Response(
-      JSON.stringify({ success: false, error: "captcha_failed" }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        }
-      }
-    );
-  }
-
-  // 2) Enrich property data
-  let propertyApiPayload: any = null;
-  let estimatedArv = 0;
-
   try {
-    propertyApiPayload = await fetchPropertyDataFromRentCast(lead);
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    // Adjust these field names based on the actual RentCast response you receive
-    estimatedArv =
-      toNumber(propertyApiPayload?.value) ||
-      toNumber(propertyApiPayload?.price) ||
-      toNumber(propertyApiPayload?.avm) ||
-      0;
-
-    if (!lead.property_sqft && propertyApiPayload?.squareFootage) {
-      lead.property_sqft = propertyApiPayload.squareFootage;
+    if (!supabaseUrl || !supabaseServiceRoleKey) {
+      console.error("Missing Supabase environment variables.");
+      return jsonResponse(
+        { success: false, error: "server_configuration_error" },
+        500
+      );
     }
 
-    if (!lead.year_built && propertyApiPayload?.yearBuilt) {
-      lead.year_built = propertyApiPayload.yearBuilt;
+    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+    const body = await req.json();
+    const { captchaToken, ...rawLead } = body ?? {};
+
+    const captchaPassed = await verifyCaptcha(captchaToken);
+    if (!captchaPassed) {
+      return jsonResponse({ success: false, error: "captcha_failed" }, 400);
     }
 
-    if (!lead.bedrooms && propertyApiPayload?.bedrooms) {
-      lead.bedrooms = propertyApiPayload.bedrooms;
+    let lead: LeadInput = { ...rawLead };
+    let propertyApiPayload: any = null;
+    let estimatedArv = 0;
+
+    try {
+      propertyApiPayload = await fetchPropertyDataFromRentCast(lead);
+      estimatedArv = extractEstimatedArv(propertyApiPayload);
+      lead = enrichLeadWithPropertyData(lead, propertyApiPayload);
+    } catch (error) {
+      console.error("Property enrichment error:", error);
     }
 
-    if (!lead.bathrooms && propertyApiPayload?.bathrooms) {
-      lead.bathrooms = propertyApiPayload.bathrooms;
-    }
-  } catch (err) {
-    console.error("Property enrichment error:", err);
-  }
+    const leadScore = calculateLeadScore(lead);
+    const estimatedRepairs = estimateRepairs(lead);
+    const suggestedOffer = calculateOffer(estimatedArv, estimatedRepairs);
+    const estimatedProfit = calculateProfit(estimatedArv, suggestedOffer);
 
-  // 3) Compute metrics
-  const leadScore = calculateLeadScore(lead);
-  const estimatedRepairs = estimateRepairs(lead);
-  const suggestedOffer = calculateOffer(estimatedArv, estimatedRepairs);
-  const estimatedProfit = calculateProfit(estimatedArv, suggestedOffer);
-
-  // 4) Insert into Supabase
-  const { error } = await supabase
-    .from("seller_leads")
-    .insert([{
+    const insertPayload = {
       ...lead,
       lead_score: leadScore,
       estimated_arv: estimatedArv,
@@ -189,37 +251,26 @@ export async function POST(req: Request) {
       suggested_offer: suggestedOffer,
       estimated_profit: estimatedProfit,
       property_api_source: propertyApiPayload ? "rentcast" : null,
-      property_api_payload: propertyApiPayload
-    }]);
+      property_api_payload: propertyApiPayload,
+    };
 
-  if (error) {
-    console.error(error);
-    return new Response(
-      JSON.stringify({ success: false, error: "insert_failed" }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        }
-      }
-    );
-  }
+    const { error } = await supabase.from("seller_leads").insert([insertPayload]);
 
-  return new Response(
-    JSON.stringify({
+    if (error) {
+      console.error("Supabase insert error:", error);
+      return jsonResponse({ success: false, error: "insert_failed" }, 500);
+    }
+
+    return jsonResponse({
       success: true,
       leadScore,
       estimatedArv,
       estimatedRepairs,
       suggestedOffer,
-      estimatedProfit
-    }),
-    {
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders
-      }
-    }
-  );
+      estimatedProfit,
+    });
+  } catch (error) {
+    console.error("API /property-lookup error:", error);
+    return jsonResponse({ success: false, error: "server_error" }, 500);
+  }
 }
