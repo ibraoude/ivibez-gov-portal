@@ -124,7 +124,16 @@ export async function POST(req: Request) {
   const captcha = await captchaVerify.json();
 
   if (!captcha.success || captcha.score < 0.5) {
-    return Response.json({ success: false, error: "captcha_failed" }, { status: 400 });
+    return new Response(
+      JSON.stringify({ success: false, error: "captcha_failed" }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      }
+    );
   }
 
   // 2) Enrich property data
