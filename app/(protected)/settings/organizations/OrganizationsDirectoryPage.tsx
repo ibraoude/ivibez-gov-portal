@@ -52,16 +52,16 @@ type Organization = {
   gov_domain: string | null;
   // normalized_name is generated; do not send from client
   legal_name: string | null;
-  email: string | null;
+  email: string;
   phone: string | null;
   website: string | null;
   logo_url: string | null;
   address_line1: string | null;
   address_line2: string | null;
-  city: string | null;
+  city: string;
   state: string | null;
   postal_code: string | null;
-  country: string | null;
+  country: string;
   allow_self_registration: boolean | null;
   require_admin_approval: boolean | null;
   updated_at: string | null; // timestamptz
