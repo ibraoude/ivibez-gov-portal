@@ -99,6 +99,12 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   return data[0];
 }
 
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders
+  });
+}
 export async function POST(req: Request) {
   const body = await req.json();
   const { captchaToken, ...lead } = body;
@@ -179,12 +185,20 @@ export async function POST(req: Request) {
     return Response.json({ success: false, error: "insert_failed" }, { status: 500 });
   }
 
-  return Response.json({
-    success: true,
-    leadScore,
-    estimatedArv,
-    estimatedRepairs,
-    suggestedOffer,
-    estimatedProfit
-  });
+  return new Response(
+    JSON.stringify({
+      success: true,
+      leadScore,
+      estimatedArv,
+      estimatedRepairs,
+      suggestedOffer,
+      estimatedProfit
+    }),
+    {
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    }
+  );
 }
