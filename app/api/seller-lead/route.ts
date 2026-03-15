@@ -26,7 +26,7 @@ export async function POST(req: Request) {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
-          secret: process.env.RECAPTCHA_SECRET || "",
+          secret: process.env.RECAPTCHA_SECRET_KEY! || "",
           response: captchaToken,
         }),
       }

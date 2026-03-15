@@ -102,7 +102,7 @@ function buildAddress(lead: LeadInput): string {
 }
 
 async function verifyCaptcha(captchaToken: string | undefined): Promise<boolean> {
-  const recaptchaSecret = process.env.RECAPTCHA_SECRET;
+  const recaptchaSecret = process.env.RECAPTCHA_SECRET_KEY;
 
   if (!recaptchaSecret) {
     throw new Error("Missing RECAPTCHA_SECRET environment variable.");
