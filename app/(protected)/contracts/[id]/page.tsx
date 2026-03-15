@@ -1,5 +1,5 @@
 
-// app/(protected)/contracts/[id]/edit/page.tsx
+// app/(protected)/contracts/[id]/page.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +8,13 @@ import { motion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client"; // browser client factory
 import { getRecaptchaToken } from "@/lib/security/recaptcha-client";
 import { FileSignature, DollarSign, CalendarRange, Users, Upload } from "lucide-react";
+import ContractTimeline from "@/components/contracts/ContractTimeline";
+import DeliverablesSection from "@/components/contracts/DeliverablesSection";
+import AssignVendor from "@/components/contracts/AssignVendor";
+import VendorSubmissions from "@/components/contracts/VendorSubmissions";
+import { logContractActivity } from "@/lib/contracts/log-contract-activity";
+import { CONTRACT_ACTIVITY_TYPES } from "@/lib/contracts/activity-types";
+import ContractActivityTimeline from "@/components/contracts/ContractActivityTimeline";
 
 type FormState = {
   contract_number: string;
@@ -21,6 +28,29 @@ type FormState = {
   client_id: string;
   status: string;
   admin_status: string;
+};
+
+type Vendor = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
+type ContractRow = {
+  tracking_id: string | null;
+  contract_number: string | null;
+  source_type: string | null;
+  gov_type: string | null;
+  title: string | null;
+  description: string | null;
+  final_amount: number | null;
+  period_start: string | null;
+  period_end: string | null;
+  client_id: string | null;
+  status: string | null;
+  admin_status: string | null;
+  vendor_id: string | null;
+  vendor: Vendor | null;
 };
 
 export default function EditContractPage() {
@@ -37,6 +67,10 @@ export default function EditContractPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [trackingId, setTrackingId] = useState<string | null>(null);
+  const [vendorName, setVendorName] = useState<string | null>(null);
+  const [hasSubmission, setHasSubmission] = useState(false);
+  const [submissionStatus, setSubmissionStatus] = useState<string | null>(null);
+  const [originalStatus, setOriginalStatus] = useState<string | null>(null);
 
   const [form, setForm] = useState<FormState>({
     contract_number: "",
@@ -51,6 +85,7 @@ export default function EditContractPage() {
     status: "",
     admin_status: "",
   });
+  
 
   const [files, setFiles] = useState<File[]>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -74,17 +109,55 @@ export default function EditContractPage() {
 
         const { data, error } = await supabase
           .from("contracts")
-          .select(
-            "tracking_id,contract_number,source_type,gov_type,title,description,final_amount,period_start,period_end,client_id,status,admin_status"
-          )
+          .select(`
+            tracking_id,
+            contract_number,
+            source_type,
+            gov_type,
+            title,
+            description,
+            final_amount,
+            period_start,
+            period_end,
+            client_id,
+            status,
+            admin_status,
+            vendor_id,
+            vendor:profiles!contracts_vendor_id_fkey (
+              id,
+              full_name,
+              email
+            )
+          `)
           .eq("id", id)
-          .single();
+          .single<ContractRow>();
 
         if (error) throw new Error(error.message);
         if (!data) throw new Error("Contract not found");
 
+        const contract = data as ContractRow;
+
+        // check if vendor submitted completion work
+        const { data: submission } = await supabase
+          .from("contract_completion_submissions")
+          .select("completion_status")
+          .eq("contract_id", id)
+          .maybeSingle();
+
+        if (submission) {
+          setHasSubmission(true);
+          setSubmissionStatus(submission.completion_status);
+        }
+
         if (!cancelled) {
           setTrackingId(data.tracking_id ?? null);
+
+          setVendorName(
+            data.vendor?.full_name ?? data.vendor?.email ?? "Unnamed Vendor"
+          );
+
+          setOriginalStatus(contract.status ?? null);
+
           setForm({
             contract_number: data.contract_number ?? "",
             source_type: data.source_type ?? "manual",
@@ -112,9 +185,12 @@ export default function EditContractPage() {
   }, [id, supabase]);
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  e.preventDefault();
 
-    try {
+  // Prevent double submission
+  if (saving) return;
+
+  try {
       setSaving(true);
 
       // 0) Ensure user session and get access token (for secure-route / RLS)
@@ -155,10 +231,32 @@ export default function EditContractPage() {
 
       const text = await res.text();
       const json = safeParseJSON(text);
+
       if (!res.ok) {
-        console.error("UPDATE ERROR:", json || text);
-        alert(typeof json === "object" && json ? JSON.stringify(json) : text || "Update failed");
+        const message =
+          json?.error ||
+          json?.message ||
+          text ||
+          "Update failed";
+
+        console.error("UPDATE ERROR:", message);
+        alert(message);
+
         return;
+      }
+
+      // log contract update
+      if (originalStatus && originalStatus !== form.status) {
+        await logContractActivity({
+          supabase,
+          contractId: id,
+          activityType: CONTRACT_ACTIVITY_TYPES.STATUS_CHANGED,
+          note: `Status changed from ${originalStatus} to ${form.status}`,
+          metadata: {
+            previous_status: originalStatus,
+            new_status: form.status,
+          },
+        });
       }
 
       router.push(`/requests`);
@@ -208,6 +306,52 @@ export default function EditContractPage() {
               <span className="font-medium">Tracking ID:</span> {trackingId}
             </p>
           )}
+        </div>
+
+        {/* Contract Timeline */}
+        <div className="mb-10">
+          <ContractTimeline
+            status={form.status || "draft"}
+            vendorAssigned={!!vendorName}
+            submissionStatus={submissionStatus}
+          />
+        </div>
+        {/* Deliverables */}
+        <div className="mt-8">
+          <DeliverablesSection contractId={id} />
+        </div>
+        {/* Vendor Submissions */}
+        <div className="mt-8">
+          <VendorSubmissions contractId={id} />
+        </div>
+        {/* Contract Activity */}
+
+        <div className="mt-10">
+          <Section
+            title="Contract Activity"
+            icon={<CalendarRange className="h-5 w-5" />}
+          >
+            <ContractActivityTimeline contractId={id} />
+          </Section>
+        </div>
+        {/* Vendor Assignment */}
+        <div className="mt-8 space-y-4">
+
+          {vendorName && (
+            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-400/20 dark:bg-green-500/10 dark:text-green-300">
+              <div className="font-semibold">Assigned Vendor</div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-base">👤</span>
+                <span>{vendorName}</span>
+              </div>
+            </div>
+          )}
+
+          <AssignVendor
+            contractId={id}
+            mode={vendorName ? "change" : "assign"}
+          />
+
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-10">
@@ -355,7 +499,7 @@ export default function EditContractPage() {
             type="submit"
             disabled={saving}
             whileTap={{ scale: 0.97 }}
-            className="w-full rounded-xl bg-blue-600 py-3 font-semibold text-white shadow transition hover:bg-blue-700 disabled:opacity-60"
+            className="w-full rounded-xl bg-blue-600 py-3 font-semibold text-white shadow transition hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saving ? "Saving..." : "Save Changes"}
           </motion.button>

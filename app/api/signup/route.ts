@@ -69,6 +69,19 @@ export async function POST(req: Request) {
       }
     );
 
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("email", String(email).toLowerCase())
+      .maybeSingle();
+
+    if (existing) {
+      return NextResponse.json(
+        { error: "Account already exists with this email" },
+        { status: 400 }
+      );
+    }
+
     /* ===============================
        CREATE AUTH USER
     ================================= */
@@ -81,7 +94,18 @@ export async function POST(req: Request) {
           first_name: first_name ?? null,
           last_name: last_name ?? null,
           phone: phone ?? null,
-        },
+
+          address_line1: address_line1 ?? null,
+          address_line2: address_line2 ?? null,
+          city: city ?? null,
+          state: state ?? null,
+          postal_code: postal_code ?? null,
+          country: country ?? null,
+          country_code: country_code ?? null,
+
+          company: null,
+          role: "vendor"
+        }
       });
 
     if (createErr || !created?.user) {
@@ -93,36 +117,6 @@ export async function POST(req: Request) {
     }
 
     const userId = created.user.id;
-
-    /* ===============================
-       UPDATE PROFILE
-       (trigger already created it)
-    ================================= */
-    const { error: profileUpdateErr } = await supabase
-      .from("profiles")
-      .update({
-        first_name: first_name ?? null,
-        last_name: last_name ?? null,
-        phone: phone ?? null,
-        email: String(email).toLowerCase(),
-        address_line1: address_line1 ?? null,
-        address_line2: address_line2 ?? null,
-        city: city ?? null,
-        state: state ?? null,
-        postal_code: postal_code ?? null,
-        country: country ?? null,
-        country_code: country_code ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", userId);
-
-    if (profileUpdateErr) {
-      console.error("PROFILE UPDATE ERROR:", profileUpdateErr);
-      return NextResponse.json(
-        { error: profileUpdateErr.message },
-        { status: 500 }
-      );
-    }
 
     /* ===============================
        AUDIT LOG

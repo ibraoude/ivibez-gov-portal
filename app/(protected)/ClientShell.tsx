@@ -1,32 +1,46 @@
-
-// app/(protected)/ClientShell.tsx
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
+
+import { getSidebarLinks, Role } from "@/lib/permissions/roles";
 
 const supabase = createClient();
 
 export default function ClientShell({ children }: { children: React.ReactNode }) {
-  // Hooks are called unconditionally at the top level (no conditionals/early returns).
   const pathname = usePathname();
 
-  const nav = [
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/awards", label: "Awards" },
-    { href: "/contracts", label: "Contracts" },
-    { href: "/requests", label: "Requests" },
-    { href: "/dashboard/members", label: "Members" },
-    { href: "/invitations", label: "Invitations" },
-    { href: "/reports", label: "Reports" },
-    { href: "/settings/users", label: "Users" },
-    { href: "/settings/organizations", label: "Organizations" },
-    { href: "/dashboard/analytics", label: "Analytics" },
-  ];
+  const [role, setRole] = useState<Role | null>(null);
+  const [nav, setNav] = useState<{ label: string; href: string }[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Hard-redirect after signing out so no previously mounted protected components re-render
-  // in the same client render cycle (prevents hook order mismatches).
+  useEffect(() => {
+    async function loadRole() {
+      const { data } = await supabase.auth.getUser();
+
+      if (!data.user) {
+        setLoading(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+
+      const r = profile?.role as Role | null;
+
+      setRole(r);
+      setNav(getSidebarLinks(r));
+      setLoading(false);
+    }
+
+    loadRole();
+  }, []);
+
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
@@ -34,6 +48,14 @@ export default function ClientShell({ children }: { children: React.ReactNode })
 
     document.location = "/login";
   };
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center text-gray-500">
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-gray-100">
@@ -49,12 +71,14 @@ export default function ClientShell({ children }: { children: React.ReactNode })
           <nav className="p-4 space-y-2" aria-label="Primary">
             {nav.map((item) => {
               const active =
-                pathname === item.href || pathname.startsWith(item.href + "/");
+                pathname === item.href ||
+                pathname.startsWith(item.href + "/");
+
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  prefetch={false} // avoid background proxy runs on protected links
+                  prefetch={false}
                   className={[
                     "block px-3 py-2 rounded-lg text-sm transition",
                     active
@@ -73,7 +97,6 @@ export default function ClientShell({ children }: { children: React.ReactNode })
           <button
             onClick={handleLogout}
             className="w-full border border-red-300 text-red-600 py-2 rounded-lg text-sm hover:bg-red-50 transition"
-            aria-label="Sign out"
           >
             Sign Out
           </button>
@@ -84,4 +107,3 @@ export default function ClientShell({ children }: { children: React.ReactNode })
     </div>
   );
 }
-``

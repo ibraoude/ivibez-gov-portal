@@ -16,7 +16,7 @@ export default async function Page({
 }) {
   const params = await searchParams;
 
-  const cookieStore = await cookies();
+  const cookieStore = await cookies(); // ✅ must await
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,14 +35,31 @@ export default async function Page({
   } = await supabase.auth.getUser();
 
   if (user) {
-    const destination =
-      params.inviteToken
-        ? `/accept?token=${encodeURIComponent(params.inviteToken)}`
-        : params.returnTo && params.returnTo !== "/login"
-        ? params.returnTo
-        : "/dashboard";
 
-    redirect(destination);
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("org_id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    // If the user has no org, go directly to org creation
+    if (!profile?.org_id) {
+      redirect("/settings/organizations/new");
+    }
+
+    if (params.inviteToken) {
+      redirect(`/accept?token=${encodeURIComponent(params.inviteToken)}`);
+    }
+
+    if (
+      params.returnTo &&
+      params.returnTo.startsWith("/") &&
+      params.returnTo !== "/login"
+    ) {
+      redirect(params.returnTo);
+    }
+
+    redirect("/dashboard");
   }
 
   return (

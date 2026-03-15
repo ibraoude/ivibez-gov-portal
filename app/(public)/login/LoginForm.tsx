@@ -1,9 +1,9 @@
-
 // app/(public)/login/LoginForm.tsx
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link"; // ✅ added
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginForm({
@@ -39,10 +39,11 @@ export default function LoginForm({
     });
 
     if (error) {
-      setError(error.message); // generic "Invalid login credentials"
+      setError(error.message);
       setSubmitting(false);
       return;
     }
+
     const nextUrl = inviteToken
       ? `/invite/accept?token=${encodeURIComponent(inviteToken)}`
       : defaultReturnTo;
@@ -61,8 +62,9 @@ export default function LoginForm({
     }
 
     setResetting(true);
+
     const { error } = await supabase.auth.resetPasswordForEmail(normalized, {
-      redirectTo: `${window.location.origin}/auth/reset`, // <-- this page will handle the password update flow
+      redirectTo: `${window.location.origin}/auth/reset`,
     });
 
     if (error) setError(error.message);
@@ -74,6 +76,7 @@ export default function LoginForm({
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white w-[420px] p-12 rounded-2xl shadow-xl">
+
         <div className="flex justify-center mb-6">
           <div className="flex items-baseline">
             <span className="text-6xl font-black text-green-700 tracking-tight">iVibeZ</span>
@@ -124,6 +127,18 @@ export default function LoginForm({
             {resetting ? "Sending reset link..." : "Forgot password?"}
           </button>
         </form>
+
+        {/* ✅ Signup link */}
+        <p className="text-center text-sm text-gray-600 mt-6">
+          Don't have an account?{" "}
+          <Link
+            href="/signup"
+            className="text-blue-600 font-semibold hover:underline"
+          >
+            Sign up
+          </Link>
+        </p>
+
       </div>
     </div>
   );

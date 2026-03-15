@@ -4,8 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-
-const supabase = createClient();
+import ProtectedPage from "@/components/auth/ProtectedPage";
 import {
   Loader2,
   Filter,
@@ -16,6 +15,7 @@ import {
   RefreshCcw,
   Download,
 } from 'lucide-react';
+import { getPermissions } from '@/lib/permissions/roles';
 
 type Role = 'owner' | 'admin' | 'manager' | 'auditor' | 'client' | 'member' | 'viewer';
 type AllowedRole = Extract<Role, 'owner' | 'admin' | 'manager' | 'auditor' | 'client' | 'member' | 'viewer'>;
@@ -88,11 +88,20 @@ const statusStyles: Record<InviteStatus, string> = {
 };
 
 export default function InvitationManagementPage() {
+  return (
+    <ProtectedPage permission="inviteUsers">
+      <InvitationManagementPageContent />
+    </ProtectedPage>
+  );
+}
+function InvitationManagementPageContent() {
+  const supabase = createClient();
   const router = useRouter();
 
   // role
   const [role, setRole] = useState<Role | null>(null);
-  const canAdmin = role === 'owner' || role === 'admin' || role === 'manager';
+  const permissions = getPermissions(role);
+  const canAdmin = permissions?.inviteUsers;
 
   // data + paging
   const [rows, setRows] = useState<Invitation[]>([]);
@@ -223,35 +232,63 @@ export default function InvitationManagementPage() {
   // Actions
   async function handleCreate() {
     if (!newEmail.trim()) return;
+
     setCreating(true);
+
     try {
       const { data: session } = await supabase.auth.getSession();
-      const token = session.session?.access_token;
+      const authToken = session.session?.access_token;
 
-      const res = await fetch('/api/invitations/create', {
-        method: 'POST',
+      const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY!;
+
+      const grecaptcha = window.grecaptcha;
+
+        if (!grecaptcha) {
+          alert("reCAPTCHA script not loaded yet. Please refresh.");
+          return;
+        }
+
+        const captchaToken = await new Promise<string>((resolve) => {
+          grecaptcha.ready(async () => {
+            const token = await grecaptcha.execute(siteKey, {
+              action: "invite_create",
+            });
+            resolve(token);
+          });
+        });
+
+      const res = await fetch("/api/invitations/create", {
+        method: "POST",
         headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           email: newEmail.trim(),
           role: newRole,
-          org_id: targetOrg || undefined, // only used for platform admins
+          org_id: targetOrg || undefined,
+          captchaToken,
         }),
       });
 
       const payload = await parseJsonOrText(res);
+
       if (!res.ok) {
-        const msg = (payload as any)?.error || (payload as any)?.body || `Create failed (${res.status})`;
+        const msg =
+          payload?.error ||
+          payload?.body ||
+          `Create failed (${res.status})`;
         alert(msg);
         return;
       }
+
       setModalOpen(false);
-      setNewEmail('');
-      setNewRole('viewer');
-      setTargetOrg('');
+      setNewEmail("");
+      setNewRole("viewer");
+      setTargetOrg("");
+
       await fetchInvitations(true);
+
     } finally {
       setCreating(false);
     }

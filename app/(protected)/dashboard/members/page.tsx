@@ -3,7 +3,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import ProtectedPage from "@/components/auth/ProtectedPage";
+import { createClient } from '@/lib/supabase/client'
 import {
   Filter,
   Search,
@@ -15,6 +16,7 @@ import {
   Loader2,
   Plus,
 } from 'lucide-react';
+import { getPermissions } from '@/lib/permissions/roles';
 
 /* ===================== Types ===================== */
 
@@ -95,13 +97,22 @@ function debounce<T extends (...args: any[]) => void>(fn: T, ms = 300) {
 /* ===================== Page ===================== */
 
 export default function MembersPage() {
+  return (
+    <ProtectedPage permission="manageMembers">
+      <MembersPageContent />
+    </ProtectedPage>
+  );
+}
+function MembersPageContent() {
+  const supabase = createClient();
   const router = useRouter();
 
   // Role + caller identification
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myOrgId, setMyOrgId] = useState<string | null>(null);
-  const canAdmin = myRole === 'owner' || myRole === 'admin' || myRole === 'manager';
+  const permissions = getPermissions(myRole);
+  const canAdmin = permissions?.manageMembers;
 
   // Data + paging
   const [rows, setRows] = useState<MemberRow[]>([]);
@@ -163,17 +174,26 @@ export default function MembersPage() {
       const authUser = session.user;
 
         // Get caller's profile: id, role, org_id
-        const { data: p } = await supabase
+        const { data: p, error } = await supabase
           .from('profiles')
           .select('id, role, org_id')
           .eq('id', authUser.id)
           .single();
 
+console.log("PROFILE QUERY RESULT:", p);
+console.log("PROFILE QUERY ERROR:", error);
+console.log("SUPABASE URL:", process.env.NEXT_PUBLIC_SUPABASE_URL)
+console.log("SUPABASE KEY:", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+
+        const orgId = p?.org_id ?? null;
+
         setMyUserId(p?.id ?? authUser.id);
         setMyRole((p?.role ?? 'viewer') as Role);
-        setMyOrgId(p?.org_id ?? null);
+        setMyOrgId(orgId);
 
-        await loadMembers(true);
+        if (orgId) {
+          await loadMembers(true, { orgId });
+        }
 
         // Optional realtime: refresh on profile changes
         const channel = supabase
@@ -200,99 +220,74 @@ export default function MembersPage() {
     async function loadMembers(
       reset = false,
       overrides?: Partial<{
-        orgId: string | null;
-        showUnassigned: boolean;
-        roleFilter: Role | '';
-        search: string;
-        sortKey: SortKey;
-        sortDir: 'asc' | 'desc';
-        page: number;
-        pageSize: number;
+        orgId: string | null
+        showUnassigned: boolean
+        roleFilter: Role | ''
+        search: string
+        page: number
+        pageSize: number
       }>
     ) {
-      setLoadingList(true);
-      setSelected([]);
+      setLoadingList(true)
 
       try {
-        const currentPage = overrides?.page ?? (reset ? 1 : Math.max(1, page));
-        const effPageSize = overrides?.pageSize ?? pageSize;
-        const from = (currentPage - 1) * effPageSize;
-        const to = from + effPageSize - 1;
 
-        const orgId = overrides?.orgId ?? myOrgId;
-        const includeUnassigned = overrides?.showUnassigned ?? showUnassigned;
-        const effRoleFilter = overrides?.roleFilter ?? roleFilter;
-        const effSearch = overrides?.search ?? search;
-        const effSortKey = overrides?.sortKey ?? sortKey;
-        const effSortDir = overrides?.sortDir ?? sortDir;
+        const orgId = overrides?.orgId ?? myOrgId
+        const includeUnassigned = overrides?.showUnassigned ?? showUnassigned
+        const effRoleFilter = overrides?.roleFilter ?? roleFilter
+        const effSearch = overrides?.search ?? search
+        const currentPage = overrides?.page ?? (reset ? 1 : page)
+        const effPageSize = overrides?.pageSize ?? pageSize
+
+        const from = (currentPage - 1) * effPageSize
+        const to = from + effPageSize - 1
+
+        console.log("Loading members for org:", orgId)
 
         let query = supabase
           .from('profiles')
           .select(
-            'id, email, role, org_id, first_name, last_name, created_at, updated_at',
+            'id,email,role,org_id,first_name,last_name,created_at,updated_at',
             { count: 'exact' }
-          );
+          )
 
-        // org/unassigned
+        // organization filter
         if (orgId) {
           if (includeUnassigned) {
-            query = query.or(`org_id.eq.${orgId},org_id.is.null`);
+            query = query.or(`org_id.eq.${orgId},org_id.is.null`)
           } else {
-            query = query.eq('org_id', orgId);
+            query = query.eq('org_id', orgId)
           }
-        } else {
-          if (!includeUnassigned) query = query.is('org_id', null);
         }
 
-        if (effRoleFilter) query = query.eq('role', effRoleFilter);
+        if (effRoleFilter) {
+          query = query.eq('role', effRoleFilter)
+        }
+
         if (effSearch.trim()) {
-          const term = effSearch.trim().replace(/[%_]/g, (m) => '\\' + m);
-          query = query.ilike('email', `%${term}%`);
+          query = query.ilike('email', `%${effSearch.trim()}%`)
         }
 
-        const serverSortMap: Record<SortKey, string> = {
-          name: 'created_at',
-          email: 'email',
-          role: 'role',
-          created_at: 'created_at',
-          updated_at: 'updated_at',
-        };
-        query = query.order(serverSortMap[effSortKey] || 'created_at', {
-          ascending: effSortDir === 'asc',
-        });
+        query = query
+          .order('created_at', { ascending: false })
+          .range(from, to)
 
-        query = query.range(from, to);
-
-        const { data, error, count } = await query.returns<MemberRow[]>();
+        const { data, error, count } = await query
 
         if (error) {
-          console.error('profiles fetch error:', error.message);
-          setRows([]);
-          setTotal(0);
-        } else {
-          let list = data ?? [];
-
-          if (effSearch.trim()) {
-            const q = effSearch.trim().toLowerCase();
-            list = list.filter((m) => matchesSearch(m, q));
-          }
-
-          if (effSortKey === 'name') {
-            list = [...list].sort((a, b) => {
-              const an = fullName(a).toLowerCase();
-              const bn = fullName(b).toLowerCase();
-              if (an < bn) return effSortDir === 'asc' ? -1 : 1;
-              if (an > bn) return effSortDir === 'asc' ? 1 : -1;
-              return 0;
-            });
-          }
-
-          setRows(list);
-          setTotal(count ?? list.length);
-          if (reset) setPage(1);
+          console.error("Members query error:", error)
+          setRows([])
+          setTotal(0)
+          return
         }
+
+        setRows((data ?? []) as MemberRow[])
+        setTotal(count ?? 0)
+
+        if (reset) setPage(1)
+
       } finally {
-        setLoadingList(false);
+        setLoadingList(false)
       }
     }
 

@@ -4,11 +4,23 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { supabase } from "@/lib/supabase"; // client-side supabase (session)
+import { createClient} from "@/lib/supabase/client"; // client-side supabase (session)
 import { getRecaptchaToken } from "@/lib/security/recaptcha-client";
 import { FileSignature, DollarSign, CalendarRange, Users, Upload } from "lucide-react";
+import ProtectedPage from "@/components/auth/ProtectedPage";
+
+
+const supabase = createClient();
 
 export default function NewContractPage() {
+  return (
+    <ProtectedPage permission="manageOrganization">
+      <NewContractContent />
+    </ProtectedPage>
+  );
+}
+
+function NewContractContent() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
@@ -77,7 +89,7 @@ export default function NewContractPage() {
         return;
       }
 
-      router.replace(`/admin/contracts/${json.contract_id}`);
+      router.replace(`/contracts/${json.contract_id}`);
     } catch (err) {
       console.error(err);
       alert("Unexpected error");

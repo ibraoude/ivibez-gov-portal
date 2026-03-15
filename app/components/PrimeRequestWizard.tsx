@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from "@/lib/supabase/client";
 import { getRecaptchaToken } from '@/lib/security/recaptcha-client';
 import { Shield, Landmark, Building2, CheckCircle, AlertTriangle } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
@@ -22,6 +22,7 @@ export default function PrimeRequestWizard({
   mode?: Mode;
   initialRequest?: any;
 }) {
+  const supabase = createClient();
   const router = useRouter();
 
   const [user, setUser] = useState<User | null>(null);

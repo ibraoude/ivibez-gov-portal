@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import DashboardClient from "./DashboardClient";
+import ProtectedPage from "@/components/auth/ProtectedPage";
 
 // (Optional) If you keep the type in a shared file, import it instead.
 // import type { GovernmentContract } from "@/types";
@@ -34,8 +35,6 @@ export default async function Page() {
         getAll() {
           return cookieStore.getAll();
         },
-        // Server Components can't write cookies; Proxy will persist refreshes.
-        // No-op here on purpose.
         setAll() {},
       },
     }
@@ -59,5 +58,9 @@ export default async function Page() {
   // ✅ Normalize null -> [] and keep a precise type
   const contracts: GovernmentContract[] = (data ?? []) as GovernmentContract[];
 
-  return <DashboardClient user={user} initialContracts={contracts} />;
+  return (
+    <ProtectedPage permission="viewReports">
+      <DashboardClient user={user} initialContracts={contracts} />
+    </ProtectedPage>
+  );
 }

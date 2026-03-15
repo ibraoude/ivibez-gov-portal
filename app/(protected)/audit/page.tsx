@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getRecaptchaToken } from "@/lib/security/recaptcha-client";
+import ProtectedPage from "@/components/auth/ProtectedPage";
 
 type JSONValue =
   | string
@@ -29,6 +30,13 @@ interface AuditLog {
 const PAGE_SIZE = 15;
 
 export default function AuditPage() {
+  return (
+    <ProtectedPage permission="viewReports">
+      <AuditPageContent />
+    </ProtectedPage>
+  );
+}
+function AuditPageContent() {
   const supabase = createClient();
 
   // ✅ Hooks are at the top level and unconditional
@@ -42,6 +50,7 @@ export default function AuditPage() {
   const [dark, setDark] = useState(false);
   const [orgFilter, setOrgFilter] = useState("");
 
+
   /* ======================================
      FETCH LOGS
   ====================================== */
@@ -51,6 +60,16 @@ export default function AuditPage() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
+        setLoading(false);
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setError("User not found");
         setLoading(false);
         return;
       }
@@ -183,6 +202,7 @@ export default function AuditPage() {
   // ✅ Early returns happen AFTER hooks (this is fine)
   if (loading) return <div className="p-8">Loading...</div>;
   if (error) return <div className="p-8 text-red-500">{error}</div>;
+
 
   return (
     <div

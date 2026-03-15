@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
+import ProtectedPage from "@/components/auth/ProtectedPage";
 import {
   Award as AwardIcon,
   CheckCircle2,
@@ -101,12 +102,16 @@ const adminStyles: Record<AdminStatus, string> = {
 /* ===================== Page ===================== */
 
 export default function AdminRequestsPage() {
+  return (
+    <ProtectedPage permission="approveRequests">
+      <AwardsPageContent />
+    </ProtectedPage>
+  );
+}
+function AwardsPageContent() {
   const router = useRouter();
   const supabase = createClient();
 
-  // Role
-  const [checking, setChecking] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // Data (paged from server; RLS enforced)
   const [rows, setRows] = useState<ReqRow[]>([]);
@@ -150,19 +155,6 @@ export default function AdminRequestsPage() {
           return;
         }
 
-        // RLS‑safe role check: read own profile
-        const { data: profile, error: pErr } = await supabase
-          .from("profiles")
-          .select("role")
-          .or(`id.eq.${data.user.id},user_id.eq.${data.user.id}`)
-          .maybeSingle();
-
-        if (pErr || !profile) {
-          setIsAdmin(false);
-        } else {
-          setIsAdmin(["admin", "manager"].includes(profile.role));
-        }
-
         await loadPage(true);
 
         // Realtime (RLS‑aware) → refresh on changes
@@ -177,7 +169,6 @@ export default function AdminRequestsPage() {
 
         channelRef.current = channel;
       } finally {
-        setChecking(false);
       }
     })();
 
@@ -513,9 +504,6 @@ export default function AdminRequestsPage() {
 
   /* ===================== Render ===================== */
 
-  // ✅ Early returns AFTER hooks — valid and safe
-  if (checking) return null;
-
   return (
     <div className="min-h-screen w-full bg-gray-50 text-gray-900 dark:bg-black dark:text-gray-100">
       <div className="mx-auto flex h-screen max-w-[1600px] flex-col">
@@ -578,7 +566,6 @@ export default function AdminRequestsPage() {
           </div>
 
           {/* Role-based visibility */}
-          {isAdmin && (
             <div className="flex items-center gap-2">
               <button
                 onClick={bulkAward}
@@ -612,7 +599,6 @@ export default function AdminRequestsPage() {
                 </select>
               </div>
             </div>
-          )}
         </div>
 
         {/* Content */}
@@ -704,14 +690,12 @@ export default function AdminRequestsPage() {
                                   <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[r.status]}`}>
                                     {labelize(r.status)}
                                   </span>
-                                  {isAdmin && (
                                     <SelectSmall
                                       disabled={busyIds.includes(r.id)}
                                       value={r.status}
                                       onChange={(val) => updateStatus(r.id, val as ServiceStatus)}
                                       options={["pending", "in_progress", "completed", "rejected"]}
                                     />
-                                  )}
                                 </div>
                               </Td>
 
@@ -724,7 +708,6 @@ export default function AdminRequestsPage() {
                                   >
                                     {labelize(r.admin_status || "submitted")}
                                   </span>
-                                  {isAdmin && (
                                     <SelectSmall
                                       disabled={busyIds.includes(r.id)}
                                       value={r.admin_status || "submitted"}
@@ -739,73 +722,74 @@ export default function AdminRequestsPage() {
                                         "closed",
                                       ]}
                                     />
-                                  )}
                                 </div>
                               </Td>
 
                               <Td align="right">
-                                {r.awarded ? (
-                                  <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                                    <CheckCircle2 className="h-4 w-4" />
-                                    Awarded
-                                  </span>
-                                ) : isAdmin ? (
-                                  <button
-                                    disabled={busyIds.includes(r.id)}
-                                    onClick={async () => {
-                                      setBusyIds((b) => [...b, r.id]);
-                                      try {
-                                        const { data: sessionData } = await supabase.auth.getSession();
-                                        const token = sessionData.session?.access_token;
-                                        const res = await fetch("/api/contracts/award", {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type": "application/json",
-                                            Authorization: `Bearer ${token}`,
-                                            "X-Request-ID": crypto.randomUUID(),
-                                          },
-                                          body: JSON.stringify({ requestId: r.id }),
-                                        });
-                                        const text = await res.text();
-                                        if (!res.ok) {
-                                          try {
-                                            const j = text ? JSON.parse(text) : {};
-                                            showToast(j.error || `Award failed (${res.status})`, "error");
-                                          } catch {
-                                            showToast(text || `Award failed (${res.status})`, "error");
-                                          }
-                                        } else {
-                                          await supabase
-                                            .from("service_requests")
-                                            .update({
-                                              admin_status: "awarded",
-                                              awarded: true,
-                                              status: "completed",
-                                              updated_at: new Date().toISOString(),
-                                            })
-                                            .eq("id", r.id);
-                                          showToast("Contract awarded", "success");
-                                          await loadPage(false);
+                               {r.awarded ? (
+                                <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  Awarded
+                                </span>
+                              ) : (
+                                <button
+                                  disabled={busyIds.includes(r.id)}
+                                  onClick={async () => {
+                                    setBusyIds((b) => [...b, r.id]);
+                                    try {
+                                      const { data: sessionData } = await supabase.auth.getSession();
+                                      const token = sessionData.session?.access_token;
+
+                                      const res = await fetch("/api/contracts/award", {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                          Authorization: `Bearer ${token}`,
+                                          "X-Request-ID": crypto.randomUUID(),
+                                        },
+                                        body: JSON.stringify({ requestId: r.id }),
+                                      });
+
+                                      const text = await res.text();
+
+                                      if (!res.ok) {
+                                        try {
+                                          const j = text ? JSON.parse(text) : {};
+                                          showToast(j.error || `Award failed (${res.status})`, "error");
+                                        } catch {
+                                          showToast(text || `Award failed (${res.status})`, "error");
                                         }
-                                      } catch (e) {
-                                        console.error(e);
-                                        showToast("Award failed", "error");
-                                      } finally {
-                                        setBusyIds((b) => b.filter((x) => x !== r.id));
+                                      } else {
+                                        await supabase
+                                          .from("service_requests")
+                                          .update({
+                                            admin_status: "awarded",
+                                            awarded: true,
+                                            status: "completed",
+                                            updated_at: new Date().toISOString(),
+                                          })
+                                          .eq("id", r.id);
+
+                                        showToast("Contract awarded", "success");
+                                        await loadPage(false);
                                       }
-                                    }}
-                                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                                  >
-                                    {busyIds.includes(r.id) ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <AwardIcon className="h-3.5 w-3.5" />
-                                    )}
-                                    Award
-                                  </button>
-                                ) : (
-                                  <span className="text-xs text-gray-500 dark:text-gray-400">No actions</span>
-                                )}
+                                    } catch (e) {
+                                      console.error(e);
+                                      showToast("Award failed", "error");
+                                    } finally {
+                                      setBusyIds((b) => b.filter((x) => x !== r.id));
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                                >
+                                  {busyIds.includes(r.id) ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <AwardIcon className="h-3.5 w-3.5" />
+                                  )}
+                                  Award
+                                </button>
+                              )}
                               </Td>
                             </motion.tr>
                           ))}

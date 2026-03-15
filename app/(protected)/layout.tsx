@@ -1,9 +1,9 @@
 // app/(protected)/layout.tsx
-
-import type { ReactNode } from "react";
+import { ReactNode } from "react";
 import ClientShell from "./ClientShell";
+//import "@/lib/security/disable-console";
 
-export default function ProtectedLayout({
+export default async function ProtectedLayout({
   children,
 }: {
   children: ReactNode;

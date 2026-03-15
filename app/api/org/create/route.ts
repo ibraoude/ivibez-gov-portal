@@ -1,6 +1,7 @@
 import { secureRoute } from "@/lib/security/secure-route";
 import { logAudit } from "@/lib/audit/log-audit";
 import { NextRequest } from "next/server";
+import { Database } from "@/types/database";
 
 export async function POST(req: NextRequest) {
   return secureRoute(
@@ -23,6 +24,16 @@ export async function POST(req: NextRequest) {
       /* ===============================
          CREATE ORGANIZATION
       =============================== */
+      const { data: existing } = await supabase
+        .from("organizations")
+        .select("id")
+        .eq("name", orgName)
+        .eq("created_by", user.id)
+        .maybeSingle();
+
+      if (existing) {
+        throw new Error("You already created an organization with this name");
+      }
 
       const { data: org, error: orgError } = await supabase
         .from("organizations")
@@ -45,7 +56,9 @@ export async function POST(req: NextRequest) {
         .from("profiles")
         .update({
           org_id: org.id,
-          role: "owner",
+          company: org.name,
+          role: "client",
+          updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);
 

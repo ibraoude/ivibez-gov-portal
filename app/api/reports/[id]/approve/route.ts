@@ -55,7 +55,7 @@ export async function POST(
         .select("*")
         .eq("id", reportId)
         .eq("org_id", orgId)
-        .single();
+        .maybeSingle();
 
       if (fetchErr) {
         return NextResponse.json({ error: fetchErr.message }, { status: 400 });

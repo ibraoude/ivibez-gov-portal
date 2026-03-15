@@ -5,6 +5,9 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import ProtectedPage from "@/components/auth/ProtectedPage";
+import Link from "next/dist/client/link";
+import ContractsDashboard from "@/components/contracts/ContractsDashboard";
 
 type ContractRow = {
   id: string;
@@ -12,27 +15,48 @@ type ContractRow = {
   tracking_id: string;
   source_request_id: string | null;
   source_type: string;
+
   gov_type: string | null;
   title: string | null;
   description: string | null;
-  status: string | null; // default 'active'
-  progress_percentage: number | null; // default 0
+
+  status: string | null;
+
+  progress_percentage: number | null;
+
   final_amount: number | null;
+
+  completion_status?: string | null;
+  payment_status?: string | null;
+
+  vendor_id?: string | null;
+
   period_of_performance: string | null;
-  period_start: string | null; // date
+  period_start: string | null;
+
   created_at: string | null;
   updated_at: string | null;
 };
 
-function statusClasses(status?: string | null) {
-  const s = (status || "").toLowerCase();
-  if (s === "active") return "bg-blue-100 text-blue-800";
-  if (s === "at_risk") return "bg-amber-100 text-amber-800";
-  if (s === "closed" || s === "completed") return "bg-green-100 text-green-800";
-  if (s === "paused" || s === "on hold") return "bg-amber-100 text-amber-700 border-amber-200";
-  if (s === "cancelled" || s === "canceled") return "bg-rose-100 text-rose-700 border-rose-200";
-  return "bg-gray-100 text-gray-700 border-gray-200";
-}
+  function statusClasses(status?: string | null) {
+    const s = (status || "").toLowerCase();
+
+    if (s === "active") return "bg-blue-100 text-blue-800";
+    if (s === "at_risk") return "bg-amber-100 text-amber-800";
+    if (s === "completed") return "bg-green-100 text-green-800";
+
+    if (s === "submitted") return "bg-yellow-100 text-yellow-800";
+    if (s === "under_review") return "bg-orange-100 text-orange-800";
+    if (s === "needs_revision") return "bg-red-100 text-red-800";
+
+    if (s === "pending") return "bg-indigo-100 text-indigo-800";
+    if (s === "paid") return "bg-green-100 text-green-800";
+
+    if (s === "paused") return "bg-gray-200 text-gray-700";
+    if (s === "cancelled") return "bg-rose-100 text-rose-700";
+
+    return "bg-gray-100 text-gray-700";
+  }
 
 function money(n: number | null) {
   if (n == null) return "—";
@@ -46,6 +70,13 @@ function money(n: number | null) {
 const supabase = createClient();
 
 export default function ContractsPage() {
+  return (
+    <ProtectedPage permission="viewReports">
+      <ContractsPageContent />
+    </ProtectedPage>
+  );
+}
+function ContractsPageContent() {
   const router = useRouter();
 
   // ✅ Hooks at top level (unconditional)
@@ -58,28 +89,21 @@ export default function ContractsPage() {
   const [sortKey, setSortKey] = useState<"created_at" | "contract_number" | "status">("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  // Form state
-  const [editing, setEditing] = useState<ContractRow | null>(null);
-  const [form, setForm] = useState({
-    contract_number: "",
-    source_type: "service_request", // or "manual" / "award"
-    gov_type: "",
-    title: "",
-    description: "",
-    status: "active",
-    progress_percentage: 0,
-    final_amount: "",
-    period_of_performance: "",
-    period_start: "",
-  });
-
-  // Optional file upload
-  const [uploading, setUploading] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
-    loadContracts();
+    init();
   }, []);
+
+  async function init() {
+    const { data } = await supabase.auth.getUser();
+
+    if (!data.user) {
+      router.push("/login");
+      return;
+    }
+
+    await loadContracts();
+  }
 
   async function loadContracts() {
     setLoading(true);
@@ -87,10 +111,27 @@ export default function ContractsPage() {
 
     const { data, error } = await supabase
       .from("contracts")
-      .select(
-        "id,contract_number,tracking_id,source_request_id,source_type,gov_type,title,description,status,progress_percentage,final_amount,period_of_performance,period_start,created_at,updated_at"
-      )
-      .returns<ContractRow[]>(); // strong typing of data
+      .select(`
+        id,
+        contract_number,
+        tracking_id,
+        source_request_id,
+        source_type,
+        gov_type,
+        title,
+        description,
+        status,
+        progress_percentage,
+        final_amount,
+        completion_status,
+        payment_status,
+        vendor_id,
+        period_of_performance,
+        period_start,
+        created_at,
+        updated_at
+      `)
+      .returns<ContractRow[]>();
 
     if (error) {
       setError(error.message);
@@ -138,94 +179,6 @@ export default function ContractsPage() {
     return rows;
   })();
 
-  function resetForm() {
-    setEditing(null);
-    setFile(null);
-    setForm({
-      contract_number: "",
-      source_type: "service_request",
-      gov_type: "",
-      title: "",
-      description: "",
-      status: "active",
-      progress_percentage: 0,
-      final_amount: "",
-      period_of_performance: "",
-      period_start: "",
-    });
-  }
-
-  function startEdit(row: ContractRow) {
-    setEditing(row);
-    setFile(null);
-    setForm({
-      contract_number: row.contract_number || "",
-      source_type: row.source_type || "service_request",
-      gov_type: row.gov_type || "",
-      title: row.title || "",
-      description: row.description || "",
-      status: row.status || "active",
-      progress_percentage: row.progress_percentage ?? 0,
-      final_amount: row.final_amount == null ? "" : String(row.final_amount),
-      period_of_performance: row.period_of_performance || "",
-      period_start: row.period_start || "",
-    });
-  }
-
-  async function handleSave() {
-    setError(null);
-
-    if (!form.contract_number.trim()) {
-      setError("Contract number is required.");
-      return;
-    }
-
-    const payload: Partial<ContractRow> & { contract_number: string; source_type: string } = {
-      contract_number: form.contract_number.trim(),
-      source_type: form.source_type,
-      gov_type: form.gov_type.trim() || null,
-      title: form.title.trim() || null,
-      description: form.description.trim() || null,
-      status: form.status.trim() || null,
-      progress_percentage: Number.isFinite(form.progress_percentage)
-        ? Number(form.progress_percentage)
-        : 0,
-      final_amount: form.final_amount.trim() ? Number(form.final_amount) : null,
-      period_of_performance: form.period_of_performance.trim() || null,
-      period_start: form.period_start.trim() || null,
-      updated_at: new Date().toISOString(),
-    };
-
-    // Optional: upload file first (if you want to store a link, add a file_path column)
-    if (file) {
-      await uploadContractFile(file, editing?.id || form.contract_number.trim());
-    }
-
-    if (editing?.id) {
-      const { error } = await supabase.from("contracts").update(payload).eq("id", editing.id);
-      if (error) {
-        setError(error.message);
-        return;
-      }
-    } else {
-      // If your DB doesn't auto-generate tracking_id, create one here
-      const tracking_id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
-
-      const { error } = await supabase.from("contracts").insert({
-        ...payload,
-        tracking_id,
-      });
-
-      if (error) {
-        setError(error.message);
-        return;
-      }
-    }
-
-    resetForm();
-    await loadContracts();
-  }
-
   async function handleDelete(id: string) {
     const ok = confirm("Delete this contract? This cannot be undone.");
     if (!ok) return;
@@ -238,27 +191,7 @@ export default function ContractsPage() {
     await loadContracts();
   }
 
-  async function uploadContractFile(f: File, key: string) {
-    setUploading(true);
-    try {
-      const ext = f.name.split(".").pop() || "bin";
-      const path = `contracts/${key}/${Date.now()}.${ext}`;
-
-      const { error } = await supabase.storage.from("contract-files").upload(path, f, {
-        upsert: true,
-        contentType: f.type || "application/octet-stream",
-      });
-
-      if (error) {
-        setError(`Upload failed: ${error.message}`);
-        return;
-      }
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  // ===== KPIs =====
+    // ===== KPIs =====
   const totalContracts = contracts.length;
   const activeContracts = contracts.filter((c) => (c.status || "").toLowerCase() === "active").length;
   const completedContracts = contracts.filter((c) => (c.status || "").toLowerCase() === "completed").length;
@@ -268,6 +201,16 @@ export default function ContractsPage() {
     .filter((c) => (c.status ?? "") === "active")
     .reduce((sum, c) => sum + (c.final_amount ?? 0), 0);
 
+  const pendingPayments = contracts.filter(
+    (c) => (c.payment_status || "").toLowerCase() === "pending"
+  ).length;
+
+  const submittedCompletion = contracts.filter(
+    (c) => (c.completion_status || "").toLowerCase() === "submitted"
+  ).length;
+
+
+
   return (
     <main className="p-6">
       <div className="mb-5 flex items-start justify-between gap-3">
@@ -276,13 +219,15 @@ export default function ContractsPage() {
           <p className="text-sm text-gray-600">Search, create, update, and track contract progress.</p>
         </div>
 
-        <button
-          onClick={() => router.replace("/contracts/new")}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        <Link
+          href="/contracts/new"
+          className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
         >
           + New Contract
-        </button>
+        </Link>
       </div>
+
+      <ContractsDashboard contracts={contracts} />
 
       <div className="grid gap-4 md:grid-cols-6">
         <KPI title="Total" value={totalContracts} />
@@ -291,6 +236,8 @@ export default function ContractsPage() {
         <KPI title="Completed" value={completedContracts} />
         <KPI title="Portfolio Value" value={`$${portfolioValue.toLocaleString()}`} />
         <KPI title="Active Exposure" value={`$${activeExposure.toLocaleString()}`} />
+        <KPI title="Pending Payments" value={pendingPayments} />
+        <KPI title="Completion Submitted" value={submittedCompletion} />
       </div>
 
       {/* Controls */}
@@ -337,7 +284,7 @@ export default function ContractsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5">
         {/* List */}
         <section className="lg:col-span-2 rounded-lg border bg-white">
           <div className="border-b px-4 py-3 font-medium">Contracts</div>
@@ -354,6 +301,8 @@ export default function ContractsPage() {
                     <th className="px-4 py-2">Contract #</th>
                     <th className="px-4 py-2">Title</th>
                     <th className="px-4 py-2">Status</th>
+                    <th className="px-4 py-2">Completion</th>
+                    <th className="px-4 py-2">Payment</th>
                     <th className="px-4 py-2">Progress</th>
                     <th className="px-4 py-2">Amount</th>
                     <th className="px-4 py-2 text-right">Actions</th>
@@ -376,6 +325,17 @@ export default function ContractsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-2">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${statusClasses(c.completion_status)}`}>
+                          {(c.completion_status || "not_submitted").toUpperCase()}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${statusClasses(c.payment_status)}`}>
+                          {(c.payment_status || "unpaid").toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
                         <div className="flex items-center gap-2">
                           <div className="h-2 w-24 rounded bg-gray-200">
                             <div
@@ -388,13 +348,29 @@ export default function ContractsPage() {
                       </td>
                       <td className="px-4 py-2">{money(c.final_amount)}</td>
                       <td className="px-4 py-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => startEdit(c)}
+                        <div className="flex justify-end gap-2 flex-wrap">
+
+                          <a
+                            href={`/contracts/${c.id}`}
                             className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
                           >
-                            Edit
-                          </button>
+                            View
+                          </a>
+
+                          <a
+                            href={`/contracts/completion-review`}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                          >
+                            Reviews
+                          </a>
+
+                          <a
+                            href={`/contracts/payment-approval`}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                          >
+                            Payment
+                          </a>
+
                           <button
                             onClick={() => handleDelete(c.id)}
                             className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700 hover:bg-rose-100"
@@ -402,7 +378,7 @@ export default function ContractsPage() {
                             Delete
                           </button>
                         </div>
-                      </td>
+                    </td>
                     </tr>
                   ))}
                 </tbody>
@@ -410,159 +386,9 @@ export default function ContractsPage() {
             </div>
           )}
         </section>
-
-        {/* Editor */}
-        <aside className="rounded-lg border bg-white">
-          <div className="border-b px-4 py-3 font-medium">
-            {editing ? "Edit Contract" : "New Contract"}
           </div>
-
-          <div className="space-y-3 p-4">
-            <div>
-              <label className="text-xs text-gray-600">Contract Number *</label>
-              <input
-                value={form.contract_number}
-                onChange={(e) => setForm((p) => ({ ...p, contract_number: e.target.value }))}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Source Type</label>
-              <select
-                value={form.source_type}
-                onChange={(e) => setForm((p) => ({ ...p, source_type: e.target.value }))}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              >
-                <option value="service_request">service_request</option>
-                <option value="manual">manual</option>
-                <option value="award">award</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Gov Type</label>
-              <input
-                value={form.gov_type}
-                onChange={(e) => setForm((p) => ({ ...p, gov_type: e.target.value }))}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Title</label>
-              <input
-                value={form.title}
-                onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Description</label>
-              <textarea
-                value={form.description}
-                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                rows={4}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-600">Status</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                >
-                  <option value="draft">draft</option>
-                  <option value="active">active</option>
-                  <option value="at_risk">at_risk</option>
-                  <option value="paused">paused</option>
-                  <option value="completed">completed</option>
-                  <option value="cancelled">cancelled</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-600">Progress %</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.progress_percentage}
-                  onChange={(e) => setForm((p) => ({ ...p, progress_percentage: Number(e.target.value) }))}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-600">Final Amount</label>
-                <input
-                  value={form.final_amount}
-                  onChange={(e) => setForm((p) => ({ ...p, final_amount: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                  placeholder="e.g. 25000"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-600">Period Start</label>
-                <input
-                  type="date"
-                  value={form.period_start}
-                  onChange={(e) => setForm((p) => ({ ...p, period_start: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Period of Performance</label>
-              <input
-                value={form.period_of_performance}
-                onChange={(e) => setForm((p) => ({ ...p, period_of_performance: e.target.value }))}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                placeholder="e.g. 12 months"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Upload File (optional)</label>
-              <input
-                type="file"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              />
-              {uploading && <div className="mt-1 text-xs text-gray-500">Uploading…</div>}
-              <div className="mt-1 text-xs text-gray-500">
-                Requires Supabase Storage bucket: <span className="font-mono">contract-files</span>
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleSave}
-                className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
-              >
-                {editing ? "Save Changes" : "Create Contract"}
-              </button>
-
-              <button
-                onClick={resetForm}
-                className="w-full rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        </aside>
-      </div>
-    </main>
-  );
+          </main>
+          );
 }
 
 /* ================= Components ================= */

@@ -1,13 +1,12 @@
-
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 import type { Database } from '@/types/database';
 
-type OrganizationInsert =
-  Database['public']['Tables']['organizations']['Insert'];
+type OrganizationInsert = Database['public']['Tables']['organizations']['Insert'];
 
 type Organization = {
   id: string;
@@ -35,12 +34,11 @@ type Organization = {
 export default function NewOrganizationPage() {
   const router = useRouter();
   const params = useSearchParams();
+  const supabase = createClient();
 
-  // ✅ Prefill from query (this page is served at /settings/organizations/new)
   const prefillName = params.get('name') ?? '';
   const prefillEmail = params.get('email') ?? '';
-  // If caller didn’t pass a return path, we’ll go back to login after creation
-  const returnTo = params.get('return') ?? '/login';
+  const returnTo = params.get('returnTo') ?? '/dashboard';
 
   const [loading, setLoading] = useState(false);
   const [me, setMe] = useState<{ id: string } | null>(null);
@@ -77,25 +75,138 @@ export default function NewOrganizationPage() {
     country: '',
   });
 
-  // 🔐 Ensure user is signed in (or bounce to /login)
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const addressRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
       if (!data?.user) {
-        router.push('/login');
+        router.replace(`/login?returnTo=${encodeURIComponent('/settings/organizations/new')}`);
         return;
       }
       setMe({ id: data.user.id });
     })();
-  }, [router]);
+  }, [router, supabase]);
 
-  const canSubmit = form.name.trim().length > 0;
+  useEffect(() => {
+    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!key) {
+      console.warn('Missing NEXT_PUBLIC_GOOGLE_MAPS_API_KEY. Address autocomplete will be disabled.');
+      return;
+    }
+
+    let cleanup: (() => void) | undefined;
+
+    (async () => {
+      try {
+        setOptions({ key, v: 'weekly' });
+        const placesLib = await importLibrary('places');
+        const { Autocomplete } = placesLib as google.maps.PlacesLibrary;
+
+        const read = (type: string, comps: any[], short = false) => {
+          const f = comps.find((c: any) => c.types.includes(type));
+          return f ? (short ? f.short_name : f.long_name) : '';
+        };
+
+        if (addressRef.current) {
+          const ac = new Autocomplete(addressRef.current, {
+            fields: ['address_components'],
+            types: ['address'],
+          });
+
+          const listener = ac.addListener('place_changed', () => {
+            const place = ac.getPlace();
+            const comps: any[] = place?.address_components || [];
+            const streetNumber = read('street_number', comps);
+            const route = read('route', comps);
+
+            setForm((p) => ({
+              ...p,
+              address_line1: `${streetNumber} ${route}`.trim(),
+              city: read('locality', comps) || read('postal_town', comps),
+              state: read('administrative_area_level_1', comps, true),
+              postal_code: read('postal_code', comps),
+              country: read('country', comps, true),
+            }));
+          });
+
+          cleanup = () => {
+            try {
+              listener.remove();
+            } catch {}
+          };
+        }
+      } catch (e) {
+        console.warn('Google Places init failed', e);
+      }
+    })();
+
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, []);
+
+  function onSelectLogo(file?: File | null) {
+    if (!file) {
+      setLogoFile(null);
+      setLogoPreview(null);
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setMsg({ type: 'error', text: 'Please select an image file.' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setMsg({ type: 'error', text: 'Max logo size is 5 MB.' });
+      return;
+    }
+    setMsg(null);
+    setLogoFile(file);
+    const url = URL.createObjectURL(file);
+    setLogoPreview(url);
+  }
+
+  const canSubmit =
+    form.name.trim().length > 0 &&
+    (form.email?.trim().length ?? 0) > 0 &&
+    (form.address_line1?.trim().length ?? 0) > 0 &&
+    (form.city?.trim().length ?? 0) > 0 &&
+    (form.state?.trim().length ?? 0) > 0 &&
+    (form.postal_code?.trim().length ?? 0) > 0 &&
+    (form.country?.trim().length ?? 0) > 0;
 
   async function createOrg() {
     if (!me) return;
 
-    if (!canSubmit) {
+    if (!form.name.trim()) {
       setMsg({ type: 'error', text: 'Organization name is required.' });
+      return;
+    }
+    if (!form.email?.trim()) {
+      setMsg({ type: 'error', text: 'Organization email is required.' });
+      return;
+    }
+    if (!form.address_line1?.trim()) {
+      setMsg({ type: 'error', text: 'Address line 1 is required.' });
+      return;
+    }
+    if (!form.city?.trim()) {
+      setMsg({ type: 'error', text: 'City is required.' });
+      return;
+    }
+    if (!form.state?.trim()) {
+      setMsg({ type: 'error', text: 'State / Province is required.' });
+      return;
+    }
+    if (!form.postal_code?.trim()) {
+      setMsg({ type: 'error', text: 'Postal code is required.' });
+      return;
+    }
+    if (!form.country?.trim()) {
+      setMsg({ type: 'error', text: 'Country is required.' });
       return;
     }
 
@@ -108,34 +219,83 @@ export default function NewOrganizationPage() {
       allow_self_registration: false,
       require_admin_approval: true,
       updated_at: new Date().toISOString(),
-      legal_name: form.legal_name || null,
-      email: form.email || null,
-      agency_type: form.agency_type || null,
-      gov_domain: form.gov_domain || null,
-      website: form.website || null,
-      address_line1: form.address_line1 || null,
-      address_line2: form.address_line2 || null,
-      city: form.city || null,
-      state: form.state || null,
-      postal_code: form.postal_code || null,
-      country: form.country || null,
+      legal_name: form.legal_name?.trim() || null,
+      email: form.email?.trim() || null,
+      agency_type: form.agency_type?.trim() || null,
+      gov_domain: form.gov_domain?.trim() || null,
+      website: form.website?.trim() || null,
+      address_line1: form.address_line1?.trim() || null,
+      address_line2: form.address_line2?.trim() || null,
+      city: form.city?.trim() || null,
+      state: form.state?.trim() || null,
+      postal_code: form.postal_code?.trim() || null,
+      country: form.country?.trim() || null,
     };
 
-    const { error } = await supabase
-  .from('organizations')
-  .insert([payload])
-  .select()
-  .single();
-    setLoading(false);
+    const { data: org, error } = await supabase
+      .from('organizations')
+      .insert([payload])
+      .select()
+      .single();
 
-    if (error) {
-      setMsg({ type: 'error', text: error.message || 'Failed to create organization.' });
+    if (error || !org) {
+      setMsg({ type: 'error', text: error?.message || 'Failed to create organization.' });
+      setLoading(false);
+      return;
+    }
+
+    const orgId = org.id as string;
+
+    if (logoFile) {
+      const ext = (logoFile.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${orgId}/${Date.now()}.${ext}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from('org-logos')
+        .upload(path, logoFile, { cacheControl: '3600', upsert: true });
+
+      if (uploadErr) {
+        setMsg({ type: 'error', text: 'Organization created, but failed to upload logo.' });
+      } else {
+        const { data: pub } = supabase.storage.from('org-logos').getPublicUrl(path);
+        const url = pub?.publicUrl ?? null;
+
+        if (url) {
+          const { error: updateErr } = await supabase
+            .from('organizations')
+            .update({ logo_url: url })
+            .eq('id', orgId);
+
+          if (updateErr) {
+            setMsg({
+              type: 'error',
+              text: 'Organization created, logo uploaded, but failed to save logo URL.',
+            });
+          }
+        }
+      }
+    }
+
+    const { error: profileUpdateError } = await supabase
+      .from('profiles')
+      .update({
+        org_id: orgId,
+        role: 'owner',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', me.id);
+
+    if (profileUpdateError) {
+      setMsg({
+        type: 'error',
+        text: 'Organization created, but failed to attach your profile as owner.',
+      });
+      setLoading(false);
       return;
     }
 
     setMsg({ type: 'success', text: 'Organization created. Redirecting…' });
-    // ✅ Respect the provided return URL (e.g., /login). If absent, default to /login.
-    router.replace(returnTo || '/login');
+    router.replace(returnTo.startsWith('/') ? returnTo : '/dashboard');
   }
 
   return (
@@ -155,13 +315,74 @@ export default function NewOrganizationPage() {
           </div>
         )}
 
-        <div className="grid gap-4">
-          <Field label="Organization Name *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-          <Field label="Legal Name" value={form.legal_name ?? ''} onChange={(v) => setForm({ ...form, legal_name: v })} />
-          <Field label="Contact Email" value={form.email ?? ''} onChange={(v) => setForm({ ...form, email: v })} />
+        <section className="grid gap-6">
+          <div className="flex items-start gap-6">
+            <div className="flex flex-col items-center gap-2">
+              <div className="h-24 w-24 overflow-hidden rounded-xl ring-1 ring-black/5 bg-gray-100">
+                {logoPreview ? (
+                  <img
+                    src={logoPreview}
+                    alt="Logo preview"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-gray-400 text-xs">
+                    No Logo
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-lg border px-3 py-1.5 text-sm shadow-sm hover:bg-gray-50"
+                  type="button"
+                >
+                  Upload Logo
+                </button>
+                {logoPreview && (
+                  <button
+                    onClick={() => onSelectLogo(null)}
+                    className="rounded-lg border px-3 py-1.5 text-sm shadow-sm hover:bg-gray-50"
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => onSelectLogo(e.target.files?.[0] ?? null)}
+              />
+            </div>
 
-        <div className="grid grid-cols-2 gap-4">
-            <Field label="Agency Type" value={form.agency_type ?? ''} onChange={(v) => setForm({ ...form, agency_type: v })} />
+            <div className="grid gap-4 flex-1">
+              <Field
+                label="Organization Name *"
+                value={form.name}
+                onChange={(v) => setForm({ ...form, name: v })}
+              />
+              <Field
+                label="Legal Name"
+                value={form.legal_name ?? ''}
+                onChange={(v) => setForm({ ...form, legal_name: v })}
+              />
+              <Field
+                label="Contact Email *"
+                value={form.email ?? ''}
+                onChange={(v) => setForm({ ...form, email: v })}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field
+              label="Agency Type"
+              value={form.agency_type ?? ''}
+              onChange={(v) => setForm({ ...form, agency_type: v })}
+            />
             <Field
               label="Gov Domain"
               value={form.gov_domain ?? ''}
@@ -170,13 +391,19 @@ export default function NewOrganizationPage() {
             />
           </div>
 
-          <Field label="Website" value={form.website ?? ''} onChange={(v) => setForm({ ...form, website: v })} placeholder="https://…" />
+          <Field
+            label="Website"
+            value={form.website ?? ''}
+            onChange={(v) => setForm({ ...form, website: v })}
+            placeholder="https://…"
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <Field
-              label="Address line 1"
+              label="Address line 1 *"
               value={form.address_line1 ?? ''}
               onChange={(v) => setForm({ ...form, address_line1: v })}
+              inputRef={addressRef}
             />
             <Field
               label="Address line 2"
@@ -186,13 +413,29 @@ export default function NewOrganizationPage() {
           </div>
 
           <div className="grid grid-cols-3 gap-4">
-            <Field label="City" value={form.city ?? ''} onChange={(v) => setForm({ ...form, city: v })} />
-            <Field label="State / Province" value={form.state ?? ''} onChange={(v) => setForm({ ...form, state: v })} />
-            <Field label="Postal Code" value={form.postal_code ?? ''} onChange={(v) => setForm({ ...form, postal_code: v })} />
+            <Field
+              label="City *"
+              value={form.city ?? ''}
+              onChange={(v) => setForm({ ...form, city: v })}
+            />
+            <Field
+              label="State / Province *"
+              value={form.state ?? ''}
+              onChange={(v) => setForm({ ...form, state: v })}
+            />
+            <Field
+              label="Postal Code *"
+              value={form.postal_code ?? ''}
+              onChange={(v) => setForm({ ...form, postal_code: v })}
+            />
           </div>
 
-          <Field label="Country" value={form.country ?? ''} onChange={(v) => setForm({ ...form, country: v })} />
-        </div>
+          <Field
+            label="Country *"
+            value={form.country ?? ''}
+            onChange={(v) => setForm({ ...form, country: v })}
+          />
+        </section>
 
         <div className="flex items-center justify-end gap-3">
           <button
@@ -221,23 +464,26 @@ function Field({
   value,
   onChange,
   placeholder,
+  inputRef,
 }: {
   label: string;
   value: string;
   onChange?: (v: string) => void;
   placeholder?: string;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
       <input
+        ref={inputRef as any}
         type="text"
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
         placeholder={placeholder}
+        autoComplete="off"
         className="w-full rounded-lg border px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
       />
     </label>
   );
 }
-``

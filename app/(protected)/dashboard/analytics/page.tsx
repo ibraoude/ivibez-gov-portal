@@ -1,10 +1,9 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import ProtectedPage from "@/components/auth/ProtectedPage";
 
-const supabase = createClient();
 import {
   ResponsiveContainer,
   LineChart,
@@ -62,6 +61,14 @@ const STATUS_OPTIONS = ['active', 'completed', 'cancelled', 'on_hold', 'pending'
    Page
    ========================= */
 export default function AnalyticsPage() {
+  return (
+    <ProtectedPage permission="viewReports">
+      <AnalyticsPageContent />
+    </ProtectedPage>
+  );
+}
+function AnalyticsPageContent() {
+  const supabase = createClient();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -79,16 +86,16 @@ export default function AnalyticsPage() {
     setLoadError(null);
 
     const { data, error } = await supabase
-    .from('contracts')
-    .select('id,title,status,gov_type,final_amount,created_at,updated_at')
-    .returns<Contract[]>();
+      .from('contracts')
+      .select('id,title,status,gov_type,final_amount,created_at,updated_at')
+      .order('created_at', { ascending: false })
 
     if (error) {
       console.error(error);
       setLoadError(error.message || 'Failed to load contracts.');
       setContracts([]);
     } else {
-      setContracts(data ?? []);
+      setContracts((data ?? []) as Contract[]);
     }
 
     setLoading(false);

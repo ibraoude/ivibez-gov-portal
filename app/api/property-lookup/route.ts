@@ -1,10 +1,20 @@
 import { createClient } from "@supabase/supabase-js";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "https://www.ivibezsolutions.com",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type"
-};
+const allowedOrigins = [
+  "https://www.ivibezsolutions.com",
+  "https://ivibezsolutions.com"
+];
+
+function getCorsHeaders(origin?: string | null) {
+  const allowedOrigin =
+    origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+  };
+}
 
 
 
@@ -102,12 +112,14 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   return data[0];
 }
 
-export async function OPTIONS() {
+export async function OPTIONS(req: Request) {
+  const origin = req.headers.get("origin");
+
   return new Response(null, {
     status: 204,
-    headers: corsHeaders
+    headers: getCorsHeaders(origin)
   });
-}
+} 
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -192,7 +204,7 @@ export async function POST(req: Request) {
         status: 500,
         headers: {
           "Content-Type": "application/json",
-          ...corsHeaders
+          ...getCorsHeaders("origin")
         }
       }
     );
@@ -210,7 +222,7 @@ export async function POST(req: Request) {
     {
       headers: {
         "Content-Type": "application/json",
-        ...corsHeaders
+        ...getCorsHeaders("origin")
       }
     }
   );

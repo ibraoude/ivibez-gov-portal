@@ -1,8 +1,9 @@
 
-import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import type { Database } from "@/types/database";
 import { secureRoute } from "@/lib/security/secure-route";
+import { logContractActivity } from "@/lib/contracts/log-contract-activity";
+import { CONTRACT_ACTIVITY_TYPES } from "@/lib/contracts/activity-types";
 
 /** Generate a unique tracking id like CON-2026-4821-ABCD */
 function generateTrackingId(prefix = "CON") {
@@ -83,6 +84,25 @@ export async function POST(req: NextRequest) {
         tracking_id = generateTrackingId();
       }
 
+      const source_request_id =
+        body.source_request_id && String(body.source_request_id).trim() !== ""
+          ? String(body.source_request_id)
+          : null;
+
+      // Check if contract number already exists
+        const { data: existingContract } = await supabase
+          .from("contracts")
+          .select("id")
+          .eq("contract_number", contract_number)
+          .maybeSingle();
+
+        if (existingContract) {
+          return NextResponse.json(
+            { error: "A contract with this contract number already exists." },
+            { status: 409 }
+          );
+        }
+
       // 3) Insert the contract (typed + RLS enforced)
       const { data: inserted, error: insertErr } = await supabase
         .from("contracts")
@@ -99,6 +119,7 @@ export async function POST(req: NextRequest) {
           period_end,              // string | null
           owner_id,                // string | null
           client_id,               // string | null
+          source_request_id,       // string | null        
           status: "active",        // string | null (Insert allows null; string is fine)
           admin_status: "awarded", // string | null
           last_updated: new Date().toISOString(),
@@ -114,6 +135,32 @@ export async function POST(req: NextRequest) {
       }
 
       const contractId = inserted.id;
+
+      try {
+        await logContractActivity({
+          supabase,
+          contractId,
+          activityType: CONTRACT_ACTIVITY_TYPES.CONTRACT_CREATED,
+          actorId: user.id,
+          actorEmail: user.email ?? null,
+          note: "Contract created",
+          details: inserted.tracking_id
+            ? `Contract ${inserted.tracking_id} created`
+            : "Contract created",
+          metadata: {
+            tracking_id: inserted.tracking_id,
+            contract_number,
+            title,
+            status: "active",
+            admin_status: "awarded",
+            source_type,
+            gov_type,
+            final_amount,
+          },
+        });
+      } catch (e) {
+        console.error("Failed to log contract activity:", e);
+      }
 
       // 4) Handle file uploads if present
       const uploads: string[] = [];

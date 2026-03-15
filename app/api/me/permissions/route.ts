@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { supabaseService } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 
 export async function GET(req: Request) {
   try {
-    const supabase = supabaseService();
+    const supabase = await createClient();
 
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ")

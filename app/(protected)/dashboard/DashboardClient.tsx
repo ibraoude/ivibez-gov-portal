@@ -18,6 +18,7 @@ import {
 import { motion, AnimatePresence, animate } from "framer-motion";
 import { AreaChart, Area, ResponsiveContainer, LineChart, Line } from "recharts";
 import { createClient } from "@/lib/supabase/client";
+import OrganizationOnboarding from "@/app/components/OrganizationOnboarding";
 
 const supabase = createClient();
 
@@ -102,6 +103,7 @@ export default function DashboardClient({
   const [user] = useState<any>(userProp);
   const [contracts, setContracts] = useState<GovernmentContract[]>(initialContracts);
   const [loading] = useState(false);
+  const [hasOrg, setHasOrg] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Keep data fresh with Realtime; no auth gating here
@@ -119,6 +121,31 @@ export default function DashboardClient({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+
+  useEffect(() => {
+    async function checkOrgMembership() {
+      if (!user?.id) {
+        setHasOrg(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("org_id")
+        .eq("id", user.id)
+        .single();
+
+      if (error) {
+        setHasOrg(false);
+        return;
+      }
+
+      setHasOrg(!!data?.org_id);
+    }
+
+    checkOrgMembership();
+  }, [user]);
 
   async function fetchContracts() {
     const { data, error } = await supabase
@@ -264,6 +291,17 @@ export default function DashboardClient({
   };
 
   const firstName = user?.email?.split("@")[0] ?? "there";
+  if (hasOrg === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500">
+        Loading workspace...
+      </div>
+    );
+  }
+
+  if (!hasOrg) {
+    return <OrganizationOnboarding user={user} />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-black transition-colors">
@@ -286,6 +324,14 @@ export default function DashboardClient({
               prefetch={false}
             >
               Audit Logs
+            </Link>
+
+            <Link
+              href="/dashboard/membership-requests"
+              className="px-4 py-2 rounded-lg border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/10 text-gray-700 dark:text-gray-100 transition"
+              prefetch={false}
+            >
+              Membership Requests
             </Link>
 
             <button
@@ -486,7 +532,7 @@ export default function DashboardClient({
                             )}
 
                             <Link
-                              href={`/dashboard/contracts/${contract.id}`}
+                              href={`/contracts/${contract.id}`}
                               className="inline-block mt-2 px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                               prefetch={false}
                             >
