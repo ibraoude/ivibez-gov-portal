@@ -1,26 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
+  import { createClient } from "@supabase/supabase-js";
 
-const allowedOrigins = [
-  "https://www.ivibezsolutions.com",
-  "https://ivibezsolutions.com"
-];
-
-function getCorsHeaders(origin?: string | null) {
-  const allowedOrigin =
-    origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-
-  return {
-    "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
-  };
-}
-
-
-
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization"
+};
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE!
+  process.env.SUPABASE_ANON_KEY!
 );
 
 function toNumber(value: unknown): number {
@@ -112,15 +99,12 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   return data[0];
 }
 
-export async function OPTIONS(req: Request) {
-  const origin = req.headers.get("origin");
-
+export async function OPTIONS() {
   return new Response(null, {
     status: 204,
-    headers: getCorsHeaders(origin)
+    headers: corsHeaders
   });
-} 
-
+}
 export async function POST(req: Request) {
   const body = await req.json();
   const { captchaToken, ...lead } = body;
@@ -133,14 +117,26 @@ export async function POST(req: Request) {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded"
       },
-      body: `secret=${process.env.RECAPTCHA_SECRET}&response=${captchaToken}`
+      body: new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET!,
+        response: captchaToken
+      })
     }
   );
 
   const captcha = await captchaVerify.json();
 
   if (!captcha.success || captcha.score < 0.5) {
-    return Response.json({ success: false, error: "captcha_failed" }, { status: 400 });
+    return new Response(
+      JSON.stringify({ success: false, error: "captcha_failed" }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      }
+    );
   }
 
   // 2) Enrich property data
@@ -204,7 +200,7 @@ export async function POST(req: Request) {
         status: 500,
         headers: {
           "Content-Type": "application/json",
-          ...getCorsHeaders("origin")
+          ...corsHeaders
         }
       }
     );
@@ -222,7 +218,7 @@ export async function POST(req: Request) {
     {
       headers: {
         "Content-Type": "application/json",
-        ...getCorsHeaders("origin")
+        ...corsHeaders
       }
     }
   );

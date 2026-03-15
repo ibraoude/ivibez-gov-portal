@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE!
+  process.env.SUPABASE_ANON_KEY!
 );
 
 export async function POST(req: Request) {
@@ -18,7 +18,10 @@ export async function POST(req: Request) {
       headers:{
         "Content-Type":"application/x-www-form-urlencoded"
       },
-      body:`secret=${process.env.RECAPTCHA_SECRET}&response=${captchaToken}`
+      body:new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET!,
+        response: captchaToken
+      })
     }
   );
 
