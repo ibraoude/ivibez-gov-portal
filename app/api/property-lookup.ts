@@ -1,5 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "https://www.ivibezsolutions.com",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type"
+};
+
+
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE!
@@ -94,6 +102,13 @@ async function fetchPropertyDataFromRentCast(lead: Record<string, any>) {
   return data[0];
 }
 
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders
+  });
+}
+
 export async function POST(req: Request) {
   const body = await req.json();
   const { captchaToken, ...lead } = body;
@@ -171,15 +186,32 @@ export async function POST(req: Request) {
 
   if (error) {
     console.error(error);
-    return Response.json({ success: false, error: "insert_failed" }, { status: 500 });
+    return new Response(
+      JSON.stringify({ success: false, error: "insert_failed" }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      }
+    );
   }
 
-  return Response.json({
-    success: true,
-    leadScore,
-    estimatedArv,
-    estimatedRepairs,
-    suggestedOffer,
-    estimatedProfit
-  });
+  return new Response(
+    JSON.stringify({
+      success: true,
+      leadScore,
+      estimatedArv,
+      estimatedRepairs,
+      suggestedOffer,
+      estimatedProfit
+    }),
+    {
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    }
+  );
 }
