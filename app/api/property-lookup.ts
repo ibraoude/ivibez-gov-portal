@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "https://www.ivibezsolutions.com",
-  "Access-Control-Allow-Origin": "https://ivibezsolutions.com"
+  "Access-Control-Allow-Origin": "https://ivibezsolutions.com",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
 };
