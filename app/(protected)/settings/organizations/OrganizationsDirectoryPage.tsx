@@ -21,6 +21,12 @@ import {
   Search,
 } from 'lucide-react';
 
+function clean(v?: string | null): string | null {
+  if (!v) return null;
+  const t = v.trim();
+  return t.length ? t : null;
+}
+
 /* ==================== Helpers ==================== */
 
 // Build invite URL like https://your-app.com/signup?org_id=...
@@ -387,18 +393,18 @@ export default function OrganizationsDirectoryPage() {
 
   const payload: OrgUpdate = {
     name: draft.name.trim(),
-    legal_name: (draft.legal_name ?? '').trim(),
-    email: (draft.email ?? '').trim(),
-    phone: (draft.phone ?? '').trim(),
-    website: (draft.website ?? '').trim(),
-    agency_type: (draft.agency_type ?? '').trim(),
-    gov_domain: (draft.gov_domain ?? '').trim(),
-    address_line1: (draft.address_line1 ?? '').trim(),
-    address_line2: (draft.address_line2 ?? '').trim(),
-    city: (draft.city ?? '').trim(),
-    state: (draft.state ?? '').trim(),
-    postal_code: (draft.postal_code ?? '').trim(),
-    country: (draft.country ?? '').trim(),
+    legal_name: draft.legal_name?.trim() ?? "",
+    email: draft.email?.trim() ?? "",
+    phone: draft.phone?.trim() ?? "",
+    website: draft.website?.trim() ?? "",
+    agency_type: draft.agency_type?.trim() ?? "",
+    gov_domain: draft.gov_domain?.trim() ?? "",
+    address_line1: draft.address_line1?.trim() ?? "",
+    address_line2: draft.address_line2?.trim() ?? "",
+    city: draft.city?.trim() ?? "",
+    state: draft.state?.trim() ?? "",
+    postal_code: draft.postal_code?.trim() ?? "",
+    country: draft.country?.trim() ?? "",
     allow_self_registration: draft.allow_self_registration ?? false,
     require_admin_approval: draft.require_admin_approval ?? true,
     updated_at: new Date().toISOString(),
@@ -444,20 +450,20 @@ export default function OrganizationsDirectoryPage() {
       return;
     }
 
-    const payload: OrgInsert = {
+   const payload: OrgInsert = {
       name: newOrg.name.trim(),
-      legal_name: (newOrg.legal_name ?? "").trim(),
-      email: (newOrg.email ?? "").trim(),
-      phone: (newOrg.phone ?? "").trim(),
-      website: (newOrg.website ?? "").trim(),
-      agency_type: (newOrg.agency_type ?? "").trim(),
-      gov_domain: (newOrg.gov_domain ?? "").trim(),
-      address_line1: (newOrg.address_line1 ?? "").trim(),
-      address_line2: (newOrg.address_line2 ?? "").trim(),
-      city: (newOrg.city ?? "").trim(),
-      state: (newOrg.state ?? "").trim(),
-      postal_code: (newOrg.postal_code ?? "").trim(),
-      country: (newOrg.country ?? "").trim(),
+      legal_name: clean(newOrg.legal_name),
+      email: newOrg.email?.trim() ?? "",
+      phone: newOrg.phone?.trim() ?? "",
+      website: newOrg.website?.trim() ?? "",
+      agency_type: newOrg.agency_type?.trim() ?? "",
+      gov_domain: newOrg.gov_domain?.trim() ?? "",
+      address_line1: newOrg.address_line1?.trim() ?? "",
+      address_line2: newOrg.address_line2?.trim() ?? "",
+      city: newOrg.city?.trim() ?? "",
+      state: clean(newOrg.state),
+      postal_code: clean(newOrg.postal_code),
+      country: newOrg.country?.trim() ?? "",
       allow_self_registration: false,
       require_admin_approval: true,
       created_by: currentUserId,
