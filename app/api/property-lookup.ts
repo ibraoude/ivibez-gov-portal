@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+  import { createClient } from "@supabase/supabase-js";
 
 const allowedOrigins = [
   "https://www.ivibezsolutions.com",
@@ -218,7 +218,7 @@ export async function POST(req: Request) {
     {
       headers: {
         "Content-Type": "application/json",
-        ...corsHeaders
+        ...getCorsHeaders(origin)
       }
     }
   );
